@@ -6,8 +6,7 @@
 #include <cstdlib>
 #include <time.h>
 #include <sys/time.h>
-#include "zlog/db.h"
-#include "zlog/backend/lmdb.h"
+#include <zlog/db.h>
 
 #if __APPLE__
 static inline uint64_t getns()
@@ -54,11 +53,8 @@ int main(int argc, char **argv)
     stop_after = atoi(argv[2]);
   }
 
-  auto be = std::unique_ptr<zlog::LMDBBackend>(new zlog::LMDBBackend());
-  be->Init(db_path);
-
   zlog::Log *log;
-  int ret = zlog::Log::CreateWithBackend(std::move(be), "log", &log);
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", db_path}}, "", "", &log);
   assert(ret == 0);
 
   DB *db;

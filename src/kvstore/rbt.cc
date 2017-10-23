@@ -1,8 +1,7 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
-#include "zlog/db.h"
-#include "zlog/backend/lmdb.h"
+#include <zlog/db.h>
 
 static inline std::string tostr(int value)
 {
@@ -14,9 +13,7 @@ static inline std::string tostr(int value)
 int main(int argc, char **argv)
 {
   zlog::Log *log;
-  auto be = std::unique_ptr<zlog::LMDBBackend>(new zlog::LMDBBackend());
-  be->Init("/tmp/zlog.bench.db");
-  int ret = zlog::Log::CreateWithBackend(std::move(be), "log", &log);
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", "/tmp/zlog.bench.db"}}, "", "", &log);
   assert(ret == 0);
 
   DB *db;

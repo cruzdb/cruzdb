@@ -1,7 +1,7 @@
 #ifndef ZLOG_INCLUDE_ZLOG_DB_H
 #define ZLOG_INCLUDE_ZLOG_DB_H
 #include <vector>
-#include "zlog/log.h"
+#include <zlog/log.h>
 #include "zlog/transaction.h"
 #include "zlog/iterator.h"
 

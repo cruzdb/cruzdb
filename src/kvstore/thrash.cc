@@ -4,10 +4,27 @@
 #include <iomanip>
 #include <map>
 #include <cstdlib>
-#include "zlog/db.h"
-#include "zlog/backend/ceph.h"
+#include <zlog/db.h>
 
 #define MAX_KEY 1000
+
+class TempDir {
+ public:
+  TempDir() {
+    memset(path, 0, sizeof(path));
+    sprintf(path, "/tmp/zlog.db.XXXXXX");
+    assert(mkdtemp(path));
+  }
+
+  ~TempDir() {
+    char cmd[64];
+    memset(cmd, 0, sizeof(cmd));
+    sprintf(cmd, "rm -rf %s", path);
+    assert(system(cmd) == 0);
+  }
+
+  char path[32];
+};
 
 static inline std::string tostr(int value)
 {
@@ -176,25 +193,14 @@ int main(int argc, char **argv)
   std::srand(0);
 
   while (1) {
+    TempDir tdir;
+
     std::vector<std::map<std::string, std::string>> truth_history;
     std::map<std::string, std::string> truth;
     truth_history.push_back(truth);
 
-    // connect to rados
-    librados::Rados cluster;
-    cluster.init(NULL);
-    cluster.conf_read_file(NULL);
-    int ret = cluster.connect();
-    assert(ret == 0);
-
-    // open pool i/o context
-    librados::IoCtx ioctx;
-    ret = cluster.ioctx_create("zlog", ioctx);
-    assert(ret == 0);
-
     zlog::Log *log;
-    auto be = std::unique_ptr<zlog::Backend>(new zlog::CephBackend(&ioctx));
-    ret = zlog::Log::CreateWithBackend(std::move(be), "log", &log);
+    int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
     assert(ret == 0);
 
     DB *db;

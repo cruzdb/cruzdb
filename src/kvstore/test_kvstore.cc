@@ -6,8 +6,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include "zlog/db.h"
-#include "include/zlog/log.h"
-#include "include/zlog/backend/lmdb.h"
+#include <zlog/log.h>
 #include "port/stack_trace.h"
 
 #define MAX_KEY 1000
@@ -169,9 +168,7 @@ TEST(DB, EquivHistory) {
 
   // initial empty kvstore database
   zlog::Log *log;
-  auto be = std::unique_ptr<zlog::LMDBBackend>(new zlog::LMDBBackend());
-  be->Init(tdir.path);
-  int ret = zlog::Log::CreateWithBackend(std::move(be), "log", &log);
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
   ASSERT_EQ(ret, 0);
 
   DB *db;
@@ -233,9 +230,7 @@ TEST(DB, Iterator) {
   TempDir tdir;
 
   zlog::Log *log;
-  auto be = std::unique_ptr<zlog::LMDBBackend>(new zlog::LMDBBackend());
-  be->Init(tdir.path);
-  int ret = zlog::Log::CreateWithBackend(std::move(be), "log", &log);
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
   ASSERT_EQ(ret, 0);
 
   DB *db;
@@ -293,9 +288,7 @@ TEST(DB, Get) {
   TempDir tdir;
 
   zlog::Log *log;
-  auto be = std::unique_ptr<zlog::LMDBBackend>(new zlog::LMDBBackend());
-  be->Init(tdir.path);
-  int ret = zlog::Log::CreateWithBackend(std::move(be), "log", &log);
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
   ASSERT_EQ(ret, 0);
 
   DB *db;
@@ -340,11 +333,8 @@ TEST(DB, ReOpen) {
   // populate a database and close it
   std::map<std::string, std::string> prev_db;
   {
-    auto be = std::unique_ptr<zlog::LMDBBackend>(new zlog::LMDBBackend());
-    be->Init(tdir.path);
-
     zlog::Log *log;
-    int ret = zlog::Log::CreateWithBackend(std::move(be), "log", &log);
+    int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
     ASSERT_EQ(ret, 0);
 
     DB *db;
@@ -376,11 +366,8 @@ TEST(DB, ReOpen) {
   }
 
   // re-open the database and verify the previous inserts
-  auto be = std::unique_ptr<zlog::LMDBBackend>(new zlog::LMDBBackend());
-  be->Init(tdir.path);
-
   zlog::Log *log;
-  int ret = zlog::Log::OpenWithBackend(std::move(be), "log", &log);
+  int ret = zlog::Log::Open("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
   ASSERT_EQ(ret, 0);
 
   DB *db;

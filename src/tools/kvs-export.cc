@@ -5,8 +5,7 @@
 #include <cstdlib>
 #include <time.h>
 #include <sys/time.h>
-#include "zlog/db.h"
-#include "zlog/backend/lmdb.h"
+#include <zlog/db.h>
 #include "kvstore/kvstore.pb.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
@@ -15,15 +14,12 @@ using namespace rapidjson;
 
 int main(int argc, char **argv)
 {
-  auto be = std::unique_ptr<zlog::LMDBBackend>(new zlog::LMDBBackend());
-  be->Init(argv[1]);
-
   bool dump_val = false;
   if (argc >= 3 && atoi(argv[2]))
     dump_val = true;
 
   zlog::Log *log;
-  int ret = zlog::Log::CreateWithBackend(std::move(be), "log", &log);
+  int ret = zlog::Log::Open("lmdb", "log", {{"path", argv[1]}}, "", "", &log);
   assert(ret == 0);
 
   uint64_t tail;
