@@ -1,4 +1,4 @@
-package com.cruzdb;
+package org.cruzdb;
 
 public abstract class ZObject {
   protected ZObject() {

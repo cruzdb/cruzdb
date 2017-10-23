@@ -1,20 +1,22 @@
-add_library(zlogjni SHARED
+include_directories(${ZLOG_INCLUDE_DIRS})
+
+add_library(cruzdbjni SHARED
   zlogjni.cc
   iterator.cc
   transaction.cc
   portal.h)
-set_target_properties(zlogjni PROPERTIES
+set_target_properties(cruzdbjni PROPERTIES
   VERSION 1.0.0
   SOVERSION 1)
 
-set(add_libs libzlog zlog_seqr libkvstore ${JNI_LIBRARIES})
+set(add_libs libkvstore ${JNI_LIBRARIES})
 
 if(BUILD_CEPH_BACKEND)
-  target_compile_definitions(zlogjni PRIVATE -DWITH_RADOS)
+  target_compile_definitions(cruzdbjni PRIVATE -DWITH_RADOS)
   list(APPEND add_libs zlog_backend_ceph)
 endif(BUILD_CEPH_BACKEND)
 
-add_dependencies(zlogjni jni_headers)
+add_dependencies(cruzdbjni jni_headers)
 include_directories(${JNI_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(zlogjni LINK_PRIVATE ${add_libs})
-install(TARGETS zlogjni DESTINATION ${CMAKE_INSTALL_LIBDIR})
+target_link_libraries(cruzdbjni LINK_PRIVATE ${add_libs})
+install(TARGETS cruzdbjni DESTINATION ${CMAKE_INSTALL_LIBDIR})

@@ -4,9 +4,8 @@
 #include <jni.h>
 #include <cassert>
 #include <sstream>
-#include "zlog/log.h"
-#include "zlog/db.h"
-#include "zlog/slice.h"
+#include <zlog/db.h>
+#include <zlog/slice.h>
 
 template<class PTR, class DERIVED> class ZlogNativeClass {
  public:
@@ -34,31 +33,10 @@ template<class PTR, class DERIVED> class ZlogNativeClass {
   }
 };
 
-class LogWrapper {
- public:
-  LogWrapper() :
-    log(nullptr)
-  {}
-
-  ~LogWrapper() {
-    if (log)
-      delete log;
-  }
-
-  zlog::Log *log;
-};
-
 class ZlogDBJni : public ZlogNativeClass<DB*, ZlogDBJni> {
  public:
   static jclass getJClass(JNIEnv *env) {
-    return ZlogNativeClass::getJClass(env, "com/cruzdb/DB");
-  }
-};
-
-class ZlogJni : public ZlogNativeClass<LogWrapper*, ZlogJni> {
- public:
-  static jclass getJClass(JNIEnv *env) {
-    return ZlogNativeClass::getJClass(env, "com/cruzdb/Log");
+    return ZlogNativeClass::getJClass(env, "org/cruzdb/DB");
   }
 };
 
@@ -97,29 +75,7 @@ class ZlogJavaException {
 class ZlogExceptionJni : public ZlogJavaException<ZlogExceptionJni> {
  public:
   static jclass getJClass(JNIEnv* env) {
-    return ZlogJavaException::getJClass(env, "com/cruzdb/LogException");
+    return ZlogJavaException::getJClass(env, "org/cruzdb/LogException");
   }
 };
-
-class ReadOnlyExceptionJni : public ZlogJavaException<ReadOnlyExceptionJni> {
- public:
-  static jclass getJClass(JNIEnv* env) {
-    return ZlogJavaException::getJClass(env, "com/cruzdb/ReadOnlyException");
-  }
-};
-
-class FilledExceptionJni : public ZlogJavaException<FilledExceptionJni> {
- public:
-  static jclass getJClass(JNIEnv* env) {
-    return ZlogJavaException::getJClass(env, "com/cruzdb/FilledException");
-  }
-};
-
-class NotWrittenExceptionJni : public ZlogJavaException<NotWrittenExceptionJni> {
- public:
-  static jclass getJClass(JNIEnv* env) {
-    return ZlogJavaException::getJClass(env, "com/cruzdb/NotWrittenException");
-  }
-};
-
 #endif

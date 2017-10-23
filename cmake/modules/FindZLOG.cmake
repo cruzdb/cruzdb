@@ -1,5 +1,8 @@
+include(UseJava)
+
 find_path(ZLOG_INCLUDE_DIR NAMES  zlog/log.h PATHS "$ENV{ZLOG_DIR}/include")
-find_library(ZLOG_LIBRARY NAMES zlog PATHS "$ENV{ZLOG_DIR}/lib" )
+find_library(ZLOG_LIBRARY NAMES zlog PATHS "$ENV{ZLOG_DIR}/lib")
+find_jar(ZLOG_JAVA zlog PATHS "$ENV{ZLOG_DIR}/share/java")
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(ZLOG DEFAULT_MSG ZLOG_INCLUDE_DIR ZLOG_LIBRARY)

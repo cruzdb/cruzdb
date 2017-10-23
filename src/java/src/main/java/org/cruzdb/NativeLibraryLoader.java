@@ -1,4 +1,4 @@
-package com.cruzdb;
+package org.cruzdb;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -11,9 +11,9 @@ public class NativeLibraryLoader {
   private static final NativeLibraryLoader instance = new NativeLibraryLoader();
   private static boolean initialized = false;
 
-  private static final String sharedLibraryName = "zlogjni";
-  private static final String jniLibraryFileName = "libzlogjni.so";
-  private static final String tempFilePrefix = "libzlogjni";
+  private static final String sharedLibraryName = "cruzdbjni";
+  private static final String jniLibraryFileName = "libcruzdbjni.so";
+  private static final String tempFilePrefix = "libcruzdb";
   private static final String tempFileSuffix = ".so";
 
   public static NativeLibraryLoader getInstance() {

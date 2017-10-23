@@ -2,8 +2,7 @@
 #include <boost/exception/diagnostic_information.hpp>
 #include <jni.h>
 
-#include "com_cruzdb_Log.h"
-#include "com_cruzdb_DB.h"
+#include "org_cruzdb_DB.h"
 #include "portal.h"
 
 static jbyteArray copyBytes(JNIEnv* env, std::string bytes) {
@@ -26,25 +25,19 @@ static jbyteArray copyBytes(JNIEnv* env, std::string bytes) {
   return jbytes;
 }
 
-void Java_com_cruzdb_Log_disposeInternal(
-    JNIEnv *env, jobject jobj, jlong jhandle)
-{
-  delete reinterpret_cast<LogWrapper*>(jhandle);
-}
-
-void Java_com_cruzdb_DB_disposeInternal(JNIEnv *env, jobject jobj,
+void Java_org_cruzdb_DB_disposeInternal(JNIEnv *env, jobject jobj,
     jlong jhandle)
 {
   delete reinterpret_cast<DB*>(jhandle);
 }
 
-void Java_com_cruzdb_DB_openNative(JNIEnv *env, jobject jobj,
+void Java_org_cruzdb_DB_openNative(JNIEnv *env, jobject jobj,
     jlong jdbHandle, jboolean jcreate)
 {
-  auto log = reinterpret_cast<LogWrapper*>(jdbHandle);
+  auto log = reinterpret_cast<zlog::Log*>(jdbHandle);
 
   DB *db;
-  int ret = DB::Open(log->log, jcreate, &db);
+  int ret = DB::Open(log, jcreate, &db);
   if (ret) {
     ZlogExceptionJni::ThrowNew(env, ret);
     return;
@@ -53,7 +46,7 @@ void Java_com_cruzdb_DB_openNative(JNIEnv *env, jobject jobj,
   ZlogDBJni::setHandle(env, jobj, db);
 }
 
-void Java_com_cruzdb_DB_put(JNIEnv *env, jobject jdb, jlong jdbHandle,
+void Java_org_cruzdb_DB_put(JNIEnv *env, jobject jdb, jlong jdbHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength, jbyteArray jval,
     jint jvalOffset, jint jvalLength)
 {
@@ -86,7 +79,7 @@ void Java_com_cruzdb_DB_put(JNIEnv *env, jobject jdb, jlong jdbHandle,
   delete [] key;
 }
 
-jint Java_com_cruzdb_DB_get(JNIEnv *env, jobject jdb, jlong jdbHandle,
+jint Java_org_cruzdb_DB_get(JNIEnv *env, jobject jdb, jlong jdbHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength, jbyteArray jval,
     jint jvalOffset, jint jvalLength)
 {
@@ -120,7 +113,7 @@ jint Java_com_cruzdb_DB_get(JNIEnv *env, jobject jdb, jlong jdbHandle,
   return value_length;
 }
 
-jbyteArray Java_com_cruzdb_DB_get__J_3BII
+jbyteArray Java_org_cruzdb_DB_get__J_3BII
   (JNIEnv *env, jobject jdb, jlong jdbHandle, jbyteArray jkey,
    jint jkeyOffset, jint jkeyLength)
 {
@@ -149,7 +142,7 @@ jbyteArray Java_com_cruzdb_DB_get__J_3BII
   return jret_value;
 }
 
-void Java_com_cruzdb_DB_delete(JNIEnv *env, jobject jdb, jlong jdbHandle,
+void Java_org_cruzdb_DB_delete(JNIEnv *env, jobject jdb, jlong jdbHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength)
 {
   auto *db = reinterpret_cast<DB*>(jdbHandle);
@@ -171,7 +164,7 @@ void Java_com_cruzdb_DB_delete(JNIEnv *env, jobject jdb, jlong jdbHandle,
   delete [] key;
 }
 
-jlong Java_com_cruzdb_DB_iterator(JNIEnv *env, jobject jdb,
+jlong Java_org_cruzdb_DB_iterator(JNIEnv *env, jobject jdb,
     jlong jdbHandle)
 {
   auto *db = reinterpret_cast<DB*>(jdbHandle);
@@ -179,143 +172,10 @@ jlong Java_com_cruzdb_DB_iterator(JNIEnv *env, jobject jdb,
   return reinterpret_cast<jlong>(iterator);
 }
 
-jlong Java_com_cruzdb_DB_transaction(JNIEnv *env, jobject jdb,
+jlong Java_org_cruzdb_DB_transaction(JNIEnv *env, jobject jdb,
     jlong jdbHandle)
 {
   auto *db = reinterpret_cast<DB*>(jdbHandle);
   auto *txn = db->BeginTransaction();
   return reinterpret_cast<jlong>(txn);
-}
-
-void Java_com_cruzdb_Log_openLMDBNative(JNIEnv *env, jobject jobj,
-    jstring jdb_path, jstring jlog_name)
-{
-  auto log = std::unique_ptr<LogWrapper>(new LogWrapper);
-  std::map<std::string, std::string> opts;
-
-  const char *db_path = env->GetStringUTFChars(jdb_path, 0);
-  opts["path"] = db_path;
-  env->ReleaseStringUTFChars(jdb_path, db_path);
-
-  const char *log_name = env->GetStringUTFChars(jlog_name, 0);
-  int ret = zlog::Log::Open("lmdb", log_name, opts,
-      "", "", &log->log);
-  if (ret == -ENOENT) {
-    ret = zlog::Log::Create("lmdb", log_name, opts,
-        "", "", &log->log);
-  }
-  env->ReleaseStringUTFChars(jlog_name, log_name);
-  if (ret)
-    goto out;
-
-  ZlogJni::setHandle(env, jobj, log.release());
-  return;
-
-out:
-  ZlogExceptionJni::ThrowNew(env, ret);
-}
-
-void Java_com_cruzdb_Log_openNative(JNIEnv *env, jobject jobj, jstring jpool,
-    jstring jseqr_server, jint jseqr_port, jstring jlog_name)
-{
-  auto log = std::unique_ptr<LogWrapper>(new LogWrapper);
-  std::map<std::string, std::string> opts;
-
-  const char *pool = env->GetStringUTFChars(jpool, 0);
-  opts["pool"] = pool;
-  env->ReleaseStringUTFChars(jpool, pool);
-
-  const char *c_server = env->GetStringUTFChars(jseqr_server, 0);
-  std::string server = c_server;
-  env->ReleaseStringUTFChars(jseqr_server, c_server);
-
-  std::stringstream port;
-  port << jseqr_port;
-
-  const char *log_name = env->GetStringUTFChars(jlog_name, 0);
-  int ret = zlog::Log::Create("ceph", log_name, opts,
-      server, port.str(), &log->log);
-  env->ReleaseStringUTFChars(jlog_name, log_name);
-  if (ret)
-    goto out;
-
-  ZlogJni::setHandle(env, jobj, log.release());
-  return;
-
-out:
-  ZlogExceptionJni::ThrowNew(env, ret);
-}
-
-jlong Java_com_cruzdb_Log_append(JNIEnv *env, jobject jlog,
-    jlong jlog_handle, jbyteArray jdata, jint jdata_len)
-{
-  auto log = reinterpret_cast<LogWrapper*>(jlog_handle);
-
-  jbyte *data = env->GetByteArrayElements(jdata, 0);
-
-  uint64_t position;
-  int ret = log->log->Append(Slice((char*)data, jdata_len), &position);
-  ZlogExceptionJni::ThrowNew(env, ret);
-  env->ReleaseByteArrayElements(jdata, data, JNI_ABORT);
-
-  return position;
-}
-
-jbyteArray Java_com_cruzdb_Log_read(JNIEnv *env, jobject jlog,
-    jlong jlog_handle, jlong jpos)
-{
-  auto log = reinterpret_cast<LogWrapper*>(jlog_handle);
-
-  uint64_t position = jpos;
-  std::string entry;
-
-  int ret = log->log->Read(position, &entry);
-  if (ret) {
-    if (ret == -ENODEV)
-      NotWrittenExceptionJni::ThrowNew(env, ret);
-    else if (ret == -EFAULT)
-      FilledExceptionJni::ThrowNew(env, ret);
-    else
-      ZlogExceptionJni::ThrowNew(env, ret);
-    return nullptr;
-  }
-
-  jbyteArray result = env->NewByteArray(static_cast<jsize>(entry.size()));
-  env->SetByteArrayRegion(result, 0, static_cast<jsize>(entry.size()),
-      reinterpret_cast<const jbyte*>(entry.data()));
-  return result;
-}
-
-void Java_com_cruzdb_Log_fill(JNIEnv *env, jobject jlog,
-    jlong jlog_handle, jlong jpos)
-{
-  auto log = reinterpret_cast<LogWrapper*>(jlog_handle);
-
-  uint64_t position = jpos;
-  int ret = log->log->Fill(position);
-  if (ret == -EROFS)
-    ReadOnlyExceptionJni::ThrowNew(env, ret);
-  else
-    ZlogExceptionJni::ThrowNew(env, ret);
-}
-
-void Java_com_cruzdb_Log_trim(JNIEnv *env, jobject jlog,
-    jlong jlog_handle, jlong jpos)
-{
-  auto log = reinterpret_cast<LogWrapper*>(jlog_handle);
-
-  uint64_t position = jpos;
-  int ret = log->log->Trim(position);
-  ZlogExceptionJni::ThrowNew(env, ret);
-}
-
-jlong Java_com_cruzdb_Log_tail(JNIEnv *env, jobject jlog,
-    jlong jlog_handle)
-{
-  auto log = reinterpret_cast<LogWrapper*>(jlog_handle);
-
-  uint64_t position;
-  int ret = log->log->CheckTail(&position);
-  ZlogExceptionJni::ThrowNew(env, ret);
-  return position;
 }

@@ -1,4 +1,4 @@
-package com.cruzdb;
+package org.cruzdb;
 
 /**
  * Signals that a zlog error has occurred.

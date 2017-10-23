@@ -1,4 +1,4 @@
-package com.cruzdb;
+package org.cruzdb;
 
 public class CruzIterator extends ZObject {
   final DB db;

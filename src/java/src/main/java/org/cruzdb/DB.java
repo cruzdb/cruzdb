@@ -1,4 +1,8 @@
-package com.cruzdb;
+package org.cruzdb;
+
+import com.cruzdb.Log;
+
+import java.io.IOException;
 
 public class DB extends ZObject {
 
@@ -12,6 +16,19 @@ public class DB extends ZObject {
     }
   }
 
+  static {
+    DB.loadLibrary();
+  }
+
+  public static synchronized void loadLibrary() {
+    String tmpDir = System.getenv("CRUZDB_SHAREDLIB_DIR");
+    try {
+      NativeLibraryLoader.getInstance().loadLibrary(tmpDir);
+    } catch (IOException e) {
+      throw new RuntimeException("Unable to load the CruzDB shared library: " + e);
+    }
+  }
+
   private DB() {
     super();
   }
@@ -20,18 +37,18 @@ public class DB extends ZObject {
    * @param log the log used to store the database.
    * @param create create the log if it doesn't exist.
    * @return database instance.
-   * @throws com.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.LogException if an error occurs in the native library.
    */
   public static DB open(Log log, boolean create) throws LogException {
     DB db = new DB();
-    db.openNative(log.nativeHandle_, create);
+    db.openNative(log.handle(), create);
     return db;
   }
 
   /**
    * @param key the key to be inserted.
    * @param value the value associated with the key.
-   * @throws com.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.LogException if an error occurs in the native library.
    */
   public void put(final byte[] key, final byte[] value) throws LogException {
     put(nativeHandle_, key, 0, key.length, value, 0, value.length);
@@ -41,7 +58,7 @@ public class DB extends ZObject {
    * @param key the key to be inserted.
    * @param value the value associated with the key.
    * @return size of value.
-   * @throws com.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.LogException if an error occurs in the native library.
    */
   public int get(final byte[] key, final byte[] value) throws LogException {
     return get(nativeHandle_, key, 0, key.length, value, 0, value.length);
@@ -50,7 +67,7 @@ public class DB extends ZObject {
   /**
    * @param key the key to be inserted.
    * @return the value of the associated key.
-   * @throws com.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.LogException if an error occurs in the native library.
    */
   public byte[] get(final byte[] key) throws LogException {
     return get(nativeHandle_, key, 0, key.length);
@@ -58,7 +75,7 @@ public class DB extends ZObject {
 
   /**
    * @param key the key of the entry to be deleted.
-   * @throws com.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.LogException if an error occurs in the native library.
    */
   public void delete(final byte[] key) throws LogException {
     delete(nativeHandle_, key, 0, key.length);
