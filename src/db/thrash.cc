@@ -1,4 +1,3 @@
-// TODO: support non-ceph backend
 #include <sstream>
 #include <iostream>
 #include <iomanip>

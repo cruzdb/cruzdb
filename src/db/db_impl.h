@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <zlog/log.h>
+
 #include "iterator_impl.h"
 #include "db/cruzdb.pb.h"
 #include "node.h"
@@ -18,7 +20,6 @@
 #include "snapshot.h"
 #include "transaction_impl.h"
 #include "cruzdb/db.h"
-#include "zlog/log.h"
 
 namespace cruzdb {
 

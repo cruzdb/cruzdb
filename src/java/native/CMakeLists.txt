@@ -11,11 +11,6 @@ set_target_properties(cruzdbjni PROPERTIES
 
 set(add_libs cruzdb ${JNI_LIBRARIES})
 
-if(BUILD_CEPH_BACKEND)
-  target_compile_definitions(cruzdbjni PRIVATE -DWITH_RADOS)
-  list(APPEND add_libs zlog_backend_ceph)
-endif(BUILD_CEPH_BACKEND)
-
 add_dependencies(cruzdbjni jni_headers)
 include_directories(${JNI_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(cruzdbjni LINK_PRIVATE ${add_libs})
