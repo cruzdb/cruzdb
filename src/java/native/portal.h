@@ -4,7 +4,7 @@
 #include <jni.h>
 #include <cassert>
 #include <sstream>
-#include <zlog/db.h>
+#include "cruzdb/db.h"
 #include <zlog/slice.h>
 
 template<class PTR, class DERIVED> class ZlogNativeClass {

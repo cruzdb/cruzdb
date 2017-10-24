@@ -4,7 +4,7 @@
 #include <iomanip>
 #include <map>
 #include <cstdlib>
-#include <zlog/db.h>
+#include "cruzdb/db.h"
 
 #define MAX_KEY 1000
 

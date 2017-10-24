@@ -3,7 +3,7 @@
 #include <jni.h>
 
 #include "org_cruzdb_Transaction.h"
-#include <zlog/transaction.h>
+#include "cruzdb/transaction.h"
 #include "portal.h"
 
 // TODO: put in common location

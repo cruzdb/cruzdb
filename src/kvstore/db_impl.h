@@ -18,7 +18,7 @@
 #include "node_cache.h"
 #include "snapshot.h"
 #include "transaction_impl.h"
-#include "zlog/db.h"
+#include "cruzdb/db.h"
 #include "zlog/log.h"
 
 std::ostream& operator<<(std::ostream& out, const SharedNodeRef& n);

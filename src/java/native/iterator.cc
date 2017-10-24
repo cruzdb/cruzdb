@@ -3,7 +3,7 @@
 #include <jni.h>
 
 #include "org_cruzdb_CruzIterator.h"
-#include <zlog/iterator.h>
+#include "cruzdb/iterator.h"
 #include "portal.h"
 
 void Java_org_cruzdb_CruzIterator_disposeInternal(JNIEnv *env,

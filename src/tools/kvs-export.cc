@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <time.h>
 #include <sys/time.h>
-#include <zlog/db.h>
+#include "cruzdb/db.h"
 #include "kvstore/kvstore.pb.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"

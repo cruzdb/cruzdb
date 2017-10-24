@@ -3,7 +3,7 @@
 #include <deque>
 #include "node.h"
 #include "kvstore/kvstore.pb.h"
-#include "zlog/transaction.h"
+#include "cruzdb/transaction.h"
 
 class DBImpl;
 

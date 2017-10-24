@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <time.h>
 #include <sys/time.h>
-#include <zlog/db.h>
+#include "cruzdb/db.h"
 
 #if __APPLE__
 static inline uint64_t getns()

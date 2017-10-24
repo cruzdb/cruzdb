@@ -2,8 +2,8 @@
 #define ZLOG_INCLUDE_ZLOG_DB_H
 #include <vector>
 #include <zlog/log.h>
-#include "zlog/transaction.h"
-#include "zlog/iterator.h"
+#include "transaction.h"
+#include "iterator.h"
 
 class Snapshot;
 

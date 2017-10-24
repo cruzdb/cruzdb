@@ -1,11 +1,10 @@
-#ifndef ZLOG_KVSTORE_ITERATOR_H
-#define ZLOG_KVSTORE_ITERATOR_H
+#pragma once
 // interface derived from facebook/rocksdb/iterator
 #include <stack>
 #include <zlog/slice.h>
 #include "node.h"
 #include "snapshot.h"
-#include "zlog/iterator.h"
+#include "cruzdb/iterator.h"
 
 class IteratorImpl : public Iterator {
  public:
@@ -86,5 +85,3 @@ class IteratorImpl : public Iterator {
   Snapshot *snapshot_;
   Direction dir;
 };
-
-#endif
