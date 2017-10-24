@@ -1,3 +1,7 @@
+// The copy-on-write red-black tree that forms the basis for the database is
+// adapted from:
+//    http://codereview.stackexchange.com/questions/119728/persistent-set-red-black-tree-follow-up
+// a copy of the original code is in commit 2ac82b5 at src/kvstore/persistent-rbtree.cc
 #include <deque>
 #include <sstream>
 #include "db_impl.h"
