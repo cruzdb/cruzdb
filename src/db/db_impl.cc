@@ -27,7 +27,7 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
       return -EINVAL;
 
     std::string blob;
-    kvstore_proto::Intention intention;
+    cruzdb_proto::Intention intention;
     intention.set_snapshot(-1);
     assert(intention.IsInitialized());
     assert(intention.SerializeToString(&blob));
@@ -75,7 +75,7 @@ int DBImpl::RestoreFromLog()
     tail--;
   }
 
-  kvstore_proto::Intention i;
+  cruzdb_proto::Intention i;
   assert(i.ParseFromString(data));
   assert(i.IsInitialized());
   auto root = cache_.CacheIntention(i, tail);
@@ -104,14 +104,14 @@ std::ostream& operator<<(std::ostream& out, const SharedNodeRef& n)
   return out;
 }
 
-std::ostream& operator<<(std::ostream& out, const kvstore_proto::NodePtr& p)
+std::ostream& operator<<(std::ostream& out, const cruzdb_proto::NodePtr& p)
 {
   out << "[n" << p.nil() << ",s" << p.self()
     << ",p" << p.csn() << ",o" << p.off() << "]";
   return out;
 }
 
-std::ostream& operator<<(std::ostream& out, const kvstore_proto::Node& n)
+std::ostream& operator<<(std::ostream& out, const cruzdb_proto::Node& n)
 {
   out << "key " << n.key() << " val " << n.val() << " ";
   out << (n.red() ? "red" : "blk") << " ";
@@ -119,7 +119,7 @@ std::ostream& operator<<(std::ostream& out, const kvstore_proto::Node& n)
   return out;
 }
 
-std::ostream& operator<<(std::ostream& out, const kvstore_proto::Intention& i)
+std::ostream& operator<<(std::ostream& out, const cruzdb_proto::Intention& i)
 {
   out << "- intention tree_size = " << i.tree_size() << std::endl;
   for (int idx = 0; idx < i.tree_size(); idx++) {
@@ -352,7 +352,7 @@ void DBImpl::TransactionFinisher()
     }
 
     // serialize the after image
-    kvstore_proto::Intention i;
+    cruzdb_proto::Intention i;
     std::vector<SharedNodeRef> delta;
     cur_txn_->SerializeAfterImage(i, delta);
 

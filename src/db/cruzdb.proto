@@ -1,6 +1,6 @@
 syntax = "proto2";
 
-package kvstore_proto;
+package cruzdb_proto;
 
 option optimize_for = SPEED;
 

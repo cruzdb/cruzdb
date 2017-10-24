@@ -6,7 +6,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include "cruzdb/db.h"
-#include "kvstore/kvstore.pb.h"
+#include "db/cruzdb.pb.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
 
@@ -33,7 +33,7 @@ int main(int argc, char **argv)
     std::string data;
     ret = log->Read(pos, &data);
     if (ret == 0) {
-      kvstore_proto::Intention i;
+      cruzdb_proto::Intention i;
       assert(i.ParseFromString(data));
       assert(i.IsInitialized());
 

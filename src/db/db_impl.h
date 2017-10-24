@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "iterator_impl.h"
-#include "kvstore/kvstore.pb.h"
+#include "db/cruzdb.pb.h"
 #include "node.h"
 #include "node_cache.h"
 #include "snapshot.h"
@@ -23,9 +23,9 @@
 namespace cruzdb {
 
 std::ostream& operator<<(std::ostream& out, const SharedNodeRef& n);
-std::ostream& operator<<(std::ostream& out, const kvstore_proto::NodePtr& p);
-std::ostream& operator<<(std::ostream& out, const kvstore_proto::Node& n);
-std::ostream& operator<<(std::ostream& out, const kvstore_proto::Intention& i);
+std::ostream& operator<<(std::ostream& out, const cruzdb_proto::NodePtr& p);
+std::ostream& operator<<(std::ostream& out, const cruzdb_proto::Node& n);
+std::ostream& operator<<(std::ostream& out, const cruzdb_proto::Intention& i);
 
 class DBImpl : public DB {
  public:

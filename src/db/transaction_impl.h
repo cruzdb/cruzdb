@@ -1,7 +1,7 @@
 #pragma once
 #include <deque>
 #include "cruzdb/transaction.h"
-#include "kvstore/kvstore.pb.h"
+#include "db/cruzdb.pb.h"
 #include "node.h"
 
 namespace cruzdb {
@@ -57,7 +57,7 @@ class TransactionImpl : public Transaction {
     completed_cond_.notify_one();
   }
 
-  void SerializeAfterImage(kvstore_proto::Intention& i,
+  void SerializeAfterImage(cruzdb_proto::Intention& i,
       std::vector<SharedNodeRef>& delta);
   void SetDeltaPosition(std::vector<SharedNodeRef>& delta, uint64_t pos);
 
@@ -157,11 +157,11 @@ class TransactionImpl : public Transaction {
       SharedNodeRef& root);
 
   // turn a transaction into a serialized protocol buffer
-  void serialize_node_ptr(kvstore_proto::NodePtr *dst, NodePtr& src,
+  void serialize_node_ptr(cruzdb_proto::NodePtr *dst, NodePtr& src,
       int maybe_offset);
-  void serialize_node(kvstore_proto::Node *dst, SharedNodeRef node,
+  void serialize_node(cruzdb_proto::Node *dst, SharedNodeRef node,
       int maybe_left_offset, int maybe_right_offset);
-  void serialize_intention(kvstore_proto::Intention& i,
+  void serialize_intention(cruzdb_proto::Intention& i,
       SharedNodeRef node, int& field_index,
       std::vector<SharedNodeRef>& delta);
 };

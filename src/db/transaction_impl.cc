@@ -13,7 +13,7 @@ void TransactionImpl::UpdateLRU()
   db_->UpdateLRU(trace_);
 }
 
-void TransactionImpl::serialize_node_ptr(kvstore_proto::NodePtr *dst,
+void TransactionImpl::serialize_node_ptr(cruzdb_proto::NodePtr *dst,
     NodePtr& src, int maybe_offset)
 {
   if (src.ref(trace_) == Node::Nil()) {
@@ -36,7 +36,7 @@ void TransactionImpl::serialize_node_ptr(kvstore_proto::NodePtr *dst,
   }
 }
 
-void TransactionImpl::serialize_node(kvstore_proto::Node *dst,
+void TransactionImpl::serialize_node(cruzdb_proto::Node *dst,
     SharedNodeRef node, int maybe_left_offset, int maybe_right_offset)
 {
   dst->set_red(node->red());
@@ -365,7 +365,7 @@ void TransactionImpl::balance_delete(SharedNodeRef extra_black,
     new_node->set_red(false);
 }
 
-void TransactionImpl::serialize_intention(kvstore_proto::Intention& i,
+void TransactionImpl::serialize_intention(cruzdb_proto::Intention& i,
     SharedNodeRef node, int& field_index, std::vector<SharedNodeRef>& delta)
 {
   assert(node != nullptr);
@@ -385,7 +385,7 @@ void TransactionImpl::serialize_intention(kvstore_proto::Intention& i,
   auto maybe_right_offset = field_index - 1;
 
   // new serialized node in the intention
-  kvstore_proto::Node *dst = i.add_tree();
+  cruzdb_proto::Node *dst = i.add_tree();
   serialize_node(dst, node, maybe_left_offset, maybe_right_offset);
   delta.push_back(node);
   field_index++;
@@ -557,7 +557,7 @@ int TransactionImpl::Get(const Slice& key, std::string* val)
   return -ENOENT;
 }
 
-void TransactionImpl::SerializeAfterImage(kvstore_proto::Intention& i,
+void TransactionImpl::SerializeAfterImage(cruzdb_proto::Intention& i,
     std::vector<SharedNodeRef>& delta)
 {
   assert(committed_);

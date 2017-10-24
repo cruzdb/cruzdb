@@ -1,7 +1,7 @@
 include_directories(${ZLOG_INCLUDE_DIRS})
 
 add_library(cruzdbjni SHARED
-  zlogjni.cc
+  cruzdbjni.cc
   iterator.cc
   transaction.cc
   portal.h)
@@ -9,7 +9,7 @@ set_target_properties(cruzdbjni PROPERTIES
   VERSION 1.0.0
   SOVERSION 1)
 
-set(add_libs libkvstore ${JNI_LIBRARIES})
+set(add_libs cruzdb ${JNI_LIBRARIES})
 
 if(BUILD_CEPH_BACKEND)
   target_compile_definitions(cruzdbjni PRIVATE -DWITH_RADOS)

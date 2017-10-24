@@ -118,7 +118,7 @@ SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
   int ret = db_->log_->Read(csn, &snapshot);
   assert(ret == 0);
 
-  kvstore_proto::Intention i;
+  cruzdb_proto::Intention i;
   assert(i.ParseFromString(snapshot));
   assert(i.IsInitialized());
 
@@ -179,7 +179,7 @@ SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
 //  ptr.set_ref(e.node);
 //}
 
-NodePtr NodeCache::CacheIntention(const kvstore_proto::Intention& i,
+NodePtr NodeCache::CacheIntention(const cruzdb_proto::Intention& i,
     uint64_t pos)
 {
   if (i.tree_size() == 0) {
@@ -231,10 +231,10 @@ NodePtr NodeCache::CacheIntention(const kvstore_proto::Intention& i,
   return ret;
 }
 
-SharedNodeRef NodeCache::deserialize_node(const kvstore_proto::Intention& i,
+SharedNodeRef NodeCache::deserialize_node(const cruzdb_proto::Intention& i,
     uint64_t pos, int index) const
 {
-  const kvstore_proto::Node& n = i.tree(index);
+  const cruzdb_proto::Node& n = i.tree(index);
 
   // TODO: replace rid==csn with a lookup table that lets us
   // use random values for more reliable assertions.

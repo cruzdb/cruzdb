@@ -21,7 +21,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src/rapidjson/include)
 
 add_subdirectory(googletest/googlemock)
 add_subdirectory(include)
-add_subdirectory(kvstore)
+add_subdirectory(db)
 add_subdirectory(tools)
 
 option(WITH_JNI "build with JNI" OFF)

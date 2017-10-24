@@ -13,7 +13,7 @@ static inline std::string tostr(int value)
 int main(int argc, char **argv)
 {
   zlog::Log *log;
-  int ret = zlog::Log::Create("lmdb", "log", {{"path", "/tmp/zlog.bench.db"}}, "", "", &log);
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", "/tmp/cruzdb.bench.db"}}, "", "", &log);
   assert(ret == 0);
 
   cruzdb::DB *db;

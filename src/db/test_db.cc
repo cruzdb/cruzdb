@@ -15,7 +15,7 @@ class TempDir {
  public:
   TempDir() {
     memset(path, 0, sizeof(path));
-    sprintf(path, "/tmp/zlog.db.XXXXXX");
+    sprintf(path, "/tmp/cruzdb.db.XXXXXX");
     assert(mkdtemp(path));
   }
 
