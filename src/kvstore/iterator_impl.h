@@ -1,10 +1,11 @@
 #pragma once
-// interface derived from facebook/rocksdb/iterator
 #include <stack>
 #include <zlog/slice.h>
+#include "cruzdb/iterator.h"
 #include "node.h"
 #include "snapshot.h"
-#include "cruzdb/iterator.h"
+
+namespace cruzdb {
 
 class IteratorImpl : public Iterator {
  public:
@@ -85,3 +86,5 @@ class IteratorImpl : public Iterator {
   Snapshot *snapshot_;
   Direction dir;
 };
+
+}

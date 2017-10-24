@@ -1,6 +1,8 @@
 #include "iterator_impl.h"
 #include "db_impl.h"
 
+namespace cruzdb {
+
 class IteratorTraceApplier {
  public:
   explicit IteratorTraceApplier(DBImpl *db) :
@@ -199,4 +201,6 @@ Slice IteratorImpl::value() const
   assert(Valid());
   return Slice(stack_.top()->val().data(),
       stack_.top()->val().size());
+}
+
 }

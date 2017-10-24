@@ -1,5 +1,4 @@
-#ifndef ZLOG_KVSTORE_DB_H
-#define ZLOG_KVSTORE_DB_H
+#pragma once
 #include <cassert>
 #include <condition_variable>
 #include <deque>
@@ -20,6 +19,8 @@
 #include "transaction_impl.h"
 #include "cruzdb/db.h"
 #include "zlog/log.h"
+
+namespace cruzdb {
 
 std::ostream& operator<<(std::ostream& out, const SharedNodeRef& n);
 std::ostream& operator<<(std::ostream& out, const kvstore_proto::NodePtr& p);
@@ -123,4 +124,4 @@ class DBImpl : public DB {
   std::thread txn_finisher_;
 };
 
-#endif
+}

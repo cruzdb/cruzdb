@@ -4,6 +4,8 @@
 #include <deque>
 #include <condition_variable>
 
+namespace cruzdb {
+
 // TODO: if usage goes above high marker block new txns
 static const size_t low_marker  =  4*1024*1024;
 //static const size_t high_marker = 8*1024*1024;
@@ -312,4 +314,6 @@ NodePtr NodeCache::ApplyAfterImageDelta(
   ret.set_offset(offset - 1);
   ret.set_read_only();
   return ret;
+}
+
 }

@@ -1,11 +1,12 @@
-#ifndef ZLOG_KVSTORE_NODE_H
-#define ZLOG_KVSTORE_NODE_H
+#pragma once
 #include <cassert>
 #include <memory>
 #include <string>
 #include <iostream>
 #include <vector>
 #include <zlog/slice.h>
+
+namespace cruzdb {
 
 class Node;
 using SharedNodeRef = std::shared_ptr<Node>;
@@ -240,4 +241,4 @@ class Node {
   bool read_only_;
 };
 
-#endif
+}

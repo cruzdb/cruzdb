@@ -57,8 +57,8 @@ static void check_history(const std::map<std::string, std::string>& a,
   }
 }
 
-static std::map<std::string, std::string> get_map(DB *db,
-    Snapshot *snapshot, bool forward, size_t split)
+static std::map<std::string, std::string> get_map(cruzdb::DB *db,
+    cruzdb::Snapshot *snapshot, bool forward, size_t split)
 {
   std::map<std::string, std::string> map;
   auto it = db->NewIterator(snapshot);
@@ -137,7 +137,7 @@ static std::map<std::string, std::string> get_map(DB *db,
 }
 
 static void test_seek(const std::map<std::string, std::string>& truth,
-    DB *db, Snapshot *snapshot)
+    cruzdb::DB *db, cruzdb::Snapshot *snapshot)
 {
   assert(truth == get_map(db, snapshot, true, 0));
 
@@ -203,11 +203,11 @@ int main(int argc, char **argv)
     int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
     assert(ret == 0);
 
-    DB *db;
-    ret = DB::Open(log, true, &db);
+    cruzdb::DB *db;
+    ret = cruzdb::DB::Open(log, true, &db);
     assert(ret == 0);
 
-    std::vector<Snapshot*> db_history;
+    std::vector<cruzdb::Snapshot*> db_history;
     db_history.push_back(db->GetSnapshot());
 
     // number of transactions in tree
@@ -270,7 +270,7 @@ int main(int argc, char **argv)
     }
     std::cout << " complete! (" << count << ")" << std::endl;
 
-    for (Snapshot *snap : db_history) {
+    for (cruzdb::Snapshot *snap : db_history) {
       db->ReleaseSnapshot(snap);
     }
 

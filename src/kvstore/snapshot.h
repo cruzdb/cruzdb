@@ -1,9 +1,10 @@
-#ifndef ZLOG_KVSTORE_SNAPSHOT_H
-#define ZLOG_KVSTORE_SNAPSHOT_H
+#pragma once
 #include <cstdint>
 #include <string>
 #include <vector>
 #include "node.h"
+
+namespace cruzdb {
 
 class Snapshot {
  public:
@@ -15,4 +16,4 @@ class Snapshot {
   NodePtr root;
 };
 
-#endif
+}

@@ -2,6 +2,8 @@
 #include <sstream>
 #include "db_impl.h"
 
+namespace cruzdb {
+
 void TransactionImpl::UpdateLRU()
 {
   db_->UpdateLRU(trace_);
@@ -583,4 +585,6 @@ void TransactionImpl::SetDeltaPosition(std::vector<SharedNodeRef>& delta,
   for (auto nn : delta) {
     nn->set_rid(pos);
   }
+}
+
 }

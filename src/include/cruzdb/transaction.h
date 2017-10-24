@@ -1,7 +1,8 @@
-#ifndef ZLOG_INCLUDE_ZLOG_TRANSACTION_H
-#define ZLOG_INCLUDE_ZLOG_TRANSACTION_H
+#pragma once
 #include <string>
 #include <zlog/slice.h>
+
+namespace cruzdb {
 
 class Transaction {
  public:
@@ -13,4 +14,4 @@ class Transaction {
   virtual void Abort() = 0;
 };
 
-#endif
+}

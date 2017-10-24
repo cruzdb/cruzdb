@@ -33,7 +33,7 @@ template<class PTR, class DERIVED> class ZlogNativeClass {
   }
 };
 
-class ZlogDBJni : public ZlogNativeClass<DB*, ZlogDBJni> {
+class ZlogDBJni : public ZlogNativeClass<cruzdb::DB*, ZlogDBJni> {
  public:
   static jclass getJClass(JNIEnv *env) {
     return ZlogNativeClass::getJClass(env, "org/cruzdb/DB");

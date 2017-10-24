@@ -30,14 +30,14 @@ static jbyteArray copyBytes(JNIEnv* env, std::string bytes) {
 void Java_org_cruzdb_Transaction_disposeInternal
   (JNIEnv *env, jobject jtxn, jlong jtxnHandle)
 {
-  delete reinterpret_cast<Transaction*>(jtxnHandle);
+  delete reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
 }
 
 void Java_org_cruzdb_Transaction_put(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength, jbyteArray jval,
     jint jvalOffset, jint jvalLength)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
 
   jbyte *key = new jbyte[jkeyLength];
   env->GetByteArrayRegion(jkey, jkeyOffset, jkeyLength, key);
@@ -66,7 +66,7 @@ void Java_org_cruzdb_Transaction_put(JNIEnv *env, jobject jtxn, jlong jtxnHandle
 jbyteArray Java_org_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
     jlong jtxnHandle, jbyteArray jkey, jint jkeyOffset, jint jkeyLength)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
 
   jbyte *key = new jbyte[jkeyLength];
   env->GetByteArrayRegion(jkey, jkeyOffset, jkeyLength, key);
@@ -99,7 +99,7 @@ jbyteArray Java_org_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
 void Java_org_cruzdb_DB_delete(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
 
   jbyte *key = new jbyte[jkeyLength];
   env->GetByteArrayRegion(jkey, jkeyOffset, jkeyLength, key);
@@ -118,13 +118,13 @@ void Java_org_cruzdb_DB_delete(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
 void Java_org_cruzdb_Transaction_commit(JNIEnv *env, jobject jtxn,
     jlong jtxnHandle)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
   txn->Commit();
 }
 
 void Java_org_cruzdb_Transaction_abort(JNIEnv *env, jobject jtxn,
     jlong jtxnHandle)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
   txn->Abort();
 }

@@ -36,8 +36,8 @@ static inline std::string tostr(int value)
   return ss.str();
 }
 
-static std::map<std::string, std::string> get_map(DB *db,
-    Snapshot *snapshot, bool forward, size_t split)
+static std::map<std::string, std::string> get_map(cruzdb::DB *db,
+    cruzdb::Snapshot *snapshot, bool forward, size_t split)
 {
   std::map<std::string, std::string> map;
   auto it = db->NewIterator(snapshot);
@@ -115,7 +115,7 @@ static std::map<std::string, std::string> get_map(DB *db,
 }
 
 static void test_seek(const std::map<std::string, std::string>& truth,
-    DB *db, Snapshot *snapshot)
+    cruzdb::DB *db, cruzdb::Snapshot *snapshot)
 {
   for (int i = 0; i < 1000; i++) {
     int nkey = std::rand() % (MAX_KEY + 200); // 0-max+200
@@ -171,11 +171,11 @@ TEST(DB, EquivHistory) {
   int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
   ASSERT_EQ(ret, 0);
 
-  DB *db;
-  ret = DB::Open(log, true, &db);
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db);
   ASSERT_EQ(ret, 0);
 
-  std::vector<Snapshot*> db_history;
+  std::vector<cruzdb::Snapshot*> db_history;
   db_history.push_back(db->GetSnapshot());
 
   // run transactions
@@ -233,8 +233,8 @@ TEST(DB, Iterator) {
   int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
   ASSERT_EQ(ret, 0);
 
-  DB *db;
-  ret = DB::Open(log, true, &db);
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db);
   ASSERT_EQ(ret, 0);
 
   std::vector<std::string> strs{"m", "f", "t"};
@@ -291,8 +291,8 @@ TEST(DB, Get) {
   int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
   ASSERT_EQ(ret, 0);
 
-  DB *db;
-  ret = DB::Open(log, true, &db);
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db);
   ASSERT_EQ(ret, 0);
 
   std::vector<std::string> strs{"a", "b", ""};
@@ -337,8 +337,8 @@ TEST(DB, ReOpen) {
     int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
     ASSERT_EQ(ret, 0);
 
-    DB *db;
-    ret = DB::Open(log, true, &db);
+    cruzdb::DB *db;
+    ret = cruzdb::DB::Open(log, true, &db);
     ASSERT_EQ(0, ret);
 
     for (int i = 0; i < 100; i++) {
@@ -370,8 +370,8 @@ TEST(DB, ReOpen) {
   int ret = zlog::Log::Open("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
   ASSERT_EQ(ret, 0);
 
-  DB *db;
-  ret = DB::Open(log, false, &db);
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, false, &db);
   ASSERT_EQ(ret, 0);
 
   std::map<std::string, std::string> curr_db;

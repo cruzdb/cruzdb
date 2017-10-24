@@ -57,8 +57,8 @@ int main(int argc, char **argv)
   int ret = zlog::Log::Create("lmdb", "log", {{"path", db_path}}, "", "", &log);
   assert(ret == 0);
 
-  DB *db;
-  ret = DB::Open(log, true, &db);
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db);
   assert(ret == 0);
 
   std::random_device rd;

@@ -1,9 +1,10 @@
-#ifndef ZLOG_KVSTORE_TRANSACTION_H
-#define ZLOG_KVSTORE_TRANSACTION_H
+#pragma once
 #include <deque>
-#include "node.h"
-#include "kvstore/kvstore.pb.h"
 #include "cruzdb/transaction.h"
+#include "kvstore/kvstore.pb.h"
+#include "node.h"
+
+namespace cruzdb {
 
 class DBImpl;
 
@@ -165,4 +166,4 @@ class TransactionImpl : public Transaction {
       std::vector<SharedNodeRef>& delta);
 };
 
-#endif
+}

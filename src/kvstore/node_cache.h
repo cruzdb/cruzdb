@@ -1,5 +1,4 @@
-#ifndef ZLOG_KVSTORE_NODE_CACHE_H
-#define ZLOG_KVSTORE_NODE_CACHE_H
+#pragma once
 #include <atomic>
 #include <unordered_map>
 #include <mutex>
@@ -9,6 +8,8 @@
 #include <condition_variable>
 #include "node.h"
 #include "kvstore/kvstore.pb.h"
+
+namespace cruzdb {
 
 class DBImpl;
 
@@ -106,4 +107,4 @@ class NodeCache {
   void do_vaccum_();
 };
 
-#endif
+}

@@ -1,6 +1,8 @@
 #include "db_impl.h"
 #include <sstream>
 
+namespace cruzdb {
+
 DBImpl::DBImpl(zlog::Log *log) :
   log_(log),
   cache_(this),
@@ -408,4 +410,6 @@ void DBImpl::CompleteTransaction(TransactionImpl *txn)
 
   // notify txn finisher
   txn_finisher_cond_.notify_one();
+}
+
 }

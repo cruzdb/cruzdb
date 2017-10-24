@@ -1,11 +1,14 @@
-#ifndef ZLOG_INCLUDE_ZLOG_DB_H
-#define ZLOG_INCLUDE_ZLOG_DB_H
+#pragma once
 #include <vector>
 #include <zlog/log.h>
-#include "transaction.h"
 #include "iterator.h"
+#include "transaction.h"
+
+namespace cruzdb {
 
 class Snapshot;
+class Iterator;
+class Transaction;
 
 class DB {
  public:
@@ -57,4 +60,4 @@ class DB {
   virtual void validate() = 0;
 };
 
-#endif
+}

@@ -16,11 +16,11 @@ int main(int argc, char **argv)
   int ret = zlog::Log::Create("lmdb", "log", {{"path", "/tmp/zlog.bench.db"}}, "", "", &log);
   assert(ret == 0);
 
-  DB *db;
-  ret = DB::Open(log, true, &db);
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db);
   assert(ret == 0);
 
-  std::vector<Snapshot*> snapshots;
+  std::vector<cruzdb::Snapshot*> snapshots;
   snapshots.push_back(db->GetSnapshot());
 
   int num_txns = 20;

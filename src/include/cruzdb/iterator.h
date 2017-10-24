@@ -1,6 +1,7 @@
-#ifndef ZLOG_INCLUDE_ZLOG_ITERATOR_H
-#define ZLOG_INCLUDE_ZLOG_ITERATOR_H
+#pragma once
 #include <zlog/slice.h>
+
+namespace cruzdb {
 
 class Iterator {
  public:
@@ -46,4 +47,4 @@ class Iterator {
   virtual Slice value() const = 0;
 };
 
-#endif
+}
