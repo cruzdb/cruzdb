@@ -2,7 +2,7 @@
 #include <boost/exception/diagnostic_information.hpp>
 #include <jni.h>
 
-#include "org_cruzdb_DB.h"
+#include "org_cruzdb_CruzDB.h"
 #include "portal.h"
 
 static jbyteArray copyBytes(JNIEnv* env, std::string bytes) {
@@ -25,13 +25,13 @@ static jbyteArray copyBytes(JNIEnv* env, std::string bytes) {
   return jbytes;
 }
 
-void Java_org_cruzdb_DB_disposeInternal(JNIEnv *env, jobject jobj,
+void Java_org_cruzdb_CruzDB_disposeInternal(JNIEnv *env, jobject jobj,
     jlong jhandle)
 {
   delete reinterpret_cast<cruzdb::DB*>(jhandle);
 }
 
-void Java_org_cruzdb_DB_openNative(JNIEnv *env, jobject jobj,
+void Java_org_cruzdb_CruzDB_openNative(JNIEnv *env, jobject jobj,
     jlong jdbHandle, jboolean jcreate)
 {
   auto log = reinterpret_cast<zlog::Log*>(jdbHandle);
@@ -39,14 +39,14 @@ void Java_org_cruzdb_DB_openNative(JNIEnv *env, jobject jobj,
   cruzdb::DB *db;
   int ret = cruzdb::DB::Open(log, jcreate, &db);
   if (ret) {
-    ZlogExceptionJni::ThrowNew(env, ret);
+    CruzDBExceptionJni::ThrowNew(env, ret);
     return;
   }
 
-  ZlogDBJni::setHandle(env, jobj, db);
+  CruzDBJni::setHandle(env, jobj, db);
 }
 
-void Java_org_cruzdb_DB_put(JNIEnv *env, jobject jdb, jlong jdbHandle,
+void Java_org_cruzdb_CruzDB_put(JNIEnv *env, jobject jdb, jlong jdbHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength, jbyteArray jval,
     jint jvalOffset, jint jvalLength)
 {
@@ -79,7 +79,7 @@ void Java_org_cruzdb_DB_put(JNIEnv *env, jobject jdb, jlong jdbHandle,
   delete [] key;
 }
 
-jint Java_org_cruzdb_DB_get(JNIEnv *env, jobject jdb, jlong jdbHandle,
+jint Java_org_cruzdb_CruzDB_get(JNIEnv *env, jobject jdb, jlong jdbHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength, jbyteArray jval,
     jint jvalOffset, jint jvalLength)
 {
@@ -113,7 +113,7 @@ jint Java_org_cruzdb_DB_get(JNIEnv *env, jobject jdb, jlong jdbHandle,
   return value_length;
 }
 
-jbyteArray Java_org_cruzdb_DB_get__J_3BII
+jbyteArray Java_org_cruzdb_CruzDB_get__J_3BII
   (JNIEnv *env, jobject jdb, jlong jdbHandle, jbyteArray jkey,
    jint jkeyOffset, jint jkeyLength)
 {
@@ -142,7 +142,7 @@ jbyteArray Java_org_cruzdb_DB_get__J_3BII
   return jret_value;
 }
 
-void Java_org_cruzdb_DB_delete(JNIEnv *env, jobject jdb, jlong jdbHandle,
+void Java_org_cruzdb_CruzDB_delete(JNIEnv *env, jobject jdb, jlong jdbHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength)
 {
   auto *db = reinterpret_cast<cruzdb::DB*>(jdbHandle);
@@ -164,7 +164,7 @@ void Java_org_cruzdb_DB_delete(JNIEnv *env, jobject jdb, jlong jdbHandle,
   delete [] key;
 }
 
-jlong Java_org_cruzdb_DB_iterator(JNIEnv *env, jobject jdb,
+jlong Java_org_cruzdb_CruzDB_iterator(JNIEnv *env, jobject jdb,
     jlong jdbHandle)
 {
   auto *db = reinterpret_cast<cruzdb::DB*>(jdbHandle);
@@ -172,7 +172,7 @@ jlong Java_org_cruzdb_DB_iterator(JNIEnv *env, jobject jdb,
   return reinterpret_cast<jlong>(iterator);
 }
 
-jlong Java_org_cruzdb_DB_transaction(JNIEnv *env, jobject jdb,
+jlong Java_org_cruzdb_CruzDB_transaction(JNIEnv *env, jobject jdb,
     jlong jdbHandle)
 {
   auto *db = reinterpret_cast<cruzdb::DB*>(jdbHandle);

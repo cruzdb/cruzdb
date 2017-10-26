@@ -6,7 +6,7 @@ import org.junit.runner.RunWith;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
-  LogTest.class
+  CruzDBTest.class
 })
 public class AllTests {
 }

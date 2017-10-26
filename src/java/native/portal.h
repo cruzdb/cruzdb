@@ -1,13 +1,11 @@
-#ifndef ZLOG_JNI_PORTAL_H
-#define ZLOG_JNI_PORTAL_H
-
+#pragma once
 #include <jni.h>
 #include <cassert>
 #include <sstream>
-#include "cruzdb/db.h"
 #include <zlog/slice.h>
+#include "cruzdb/db.h"
 
-template<class PTR, class DERIVED> class ZlogNativeClass {
+template<class PTR, class DERIVED> class CruzNativeClass {
  public:
   static jclass getJClass(JNIEnv *env, const char *jclazz_name) {
     jclass jclazz = env->FindClass(jclazz_name);
@@ -33,15 +31,15 @@ template<class PTR, class DERIVED> class ZlogNativeClass {
   }
 };
 
-class ZlogDBJni : public ZlogNativeClass<cruzdb::DB*, ZlogDBJni> {
+class CruzDBJni : public CruzNativeClass<cruzdb::DB*, CruzDBJni> {
  public:
   static jclass getJClass(JNIEnv *env) {
-    return ZlogNativeClass::getJClass(env, "org/cruzdb/DB");
+    return CruzNativeClass::getJClass(env, "org/cruzdb/CruzDB");
   }
 };
 
 template<class DERIVED>
-class ZlogJavaException {
+class CruzJavaException {
  public:
   static jclass getJClass(JNIEnv *env, const char *jclazz_name) {
     jclass jclazz = env->FindClass(jclazz_name);
@@ -72,10 +70,9 @@ class ZlogJavaException {
   }
 };
 
-class ZlogExceptionJni : public ZlogJavaException<ZlogExceptionJni> {
+class CruzDBExceptionJni : public CruzJavaException<CruzDBExceptionJni> {
  public:
   static jclass getJClass(JNIEnv* env) {
-    return ZlogJavaException::getJClass(env, "org/cruzdb/LogException");
+    return CruzJavaException::getJClass(env, "org/cruzdb/CruzDBException");
   }
 };
-#endif

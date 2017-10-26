@@ -86,7 +86,7 @@ jbyteArray Java_org_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
     return nullptr;
 
   if (ret) {
-    ZlogExceptionJni::ThrowNew(env, ret);
+    CruzDBExceptionJni::ThrowNew(env, ret);
     return nullptr;
   }
 
@@ -96,7 +96,7 @@ jbyteArray Java_org_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
   return jret_value;
 }
 
-void Java_org_cruzdb_DB_delete(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
+void Java_org_cruzdb_Transaction_delete(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength)
 {
   auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);

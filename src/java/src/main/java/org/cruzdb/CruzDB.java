@@ -1,23 +1,15 @@
 package org.cruzdb;
 
-import com.cruzdb.Log;
-
 import java.io.IOException;
+import org.cruzdb.zlog.Log;
 
-public class DB extends ZObject {
+public class CruzDB extends CruzObject {
 
+  // FIXME
   public static final int NOT_FOUND = -1;
 
-  @Override
-  protected void disposeInternal() {
-    synchronized (this) {
-      assert(isInitialized());
-      disposeInternal(nativeHandle_);
-    }
-  }
-
   static {
-    DB.loadLibrary();
+    CruzDB.loadLibrary();
   }
 
   public static synchronized void loadLibrary() {
@@ -29,18 +21,26 @@ public class DB extends ZObject {
     }
   }
 
-  private DB() {
+  private CruzDB() {
     super();
+  }
+
+  @Override
+  protected void disposeInternal() {
+    synchronized (this) {
+      assert(isInitialized());
+      disposeInternal(nativeHandle_);
+    }
   }
 
   /**
    * @param log the log used to store the database.
    * @param create create the log if it doesn't exist.
    * @return database instance.
-   * @throws org.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.CruzDBException if an error occurs in the native library.
    */
-  public static DB open(Log log, boolean create) throws LogException {
-    DB db = new DB();
+  public static CruzDB open(Log log, boolean create) throws CruzDBException {
+    CruzDB db = new CruzDB();
     db.openNative(log.handle(), create);
     return db;
   }
@@ -48,9 +48,9 @@ public class DB extends ZObject {
   /**
    * @param key the key to be inserted.
    * @param value the value associated with the key.
-   * @throws org.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.CruzDBException if an error occurs in the native library.
    */
-  public void put(final byte[] key, final byte[] value) throws LogException {
+  public void put(final byte[] key, final byte[] value) throws CruzDBException {
     put(nativeHandle_, key, 0, key.length, value, 0, value.length);
   }
 
@@ -58,26 +58,26 @@ public class DB extends ZObject {
    * @param key the key to be inserted.
    * @param value the value associated with the key.
    * @return size of value.
-   * @throws org.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.CruzDBException if an error occurs in the native library.
    */
-  public int get(final byte[] key, final byte[] value) throws LogException {
+  public int get(final byte[] key, final byte[] value) throws CruzDBException {
     return get(nativeHandle_, key, 0, key.length, value, 0, value.length);
   }
 
   /**
    * @param key the key to be inserted.
    * @return the value of the associated key.
-   * @throws org.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.CruzDBException if an error occurs in the native library.
    */
-  public byte[] get(final byte[] key) throws LogException {
+  public byte[] get(final byte[] key) throws CruzDBException {
     return get(nativeHandle_, key, 0, key.length);
   }
 
   /**
    * @param key the key of the entry to be deleted.
-   * @throws org.cruzdb.LogException if an error occurs in the native library.
+   * @throws org.cruzdb.CruzDBException if an error occurs in the native library.
    */
-  public void delete(final byte[] key) throws LogException {
+  public void delete(final byte[] key) throws CruzDBException {
     delete(nativeHandle_, key, 0, key.length);
   }
 
@@ -96,15 +96,15 @@ public class DB extends ZObject {
   }
 
   private native void disposeInternal(long handle);
-  private native void openNative(long dbHandle, boolean create) throws LogException;
+  private native void openNative(long logHandle, boolean create) throws CruzDBException;
   private native void put(long handle, byte[] key, int keyOffset, int keyLength,
-      byte[] value, int valueOffset, int valueLength) throws LogException;
+      byte[] value, int valueOffset, int valueLength) throws CruzDBException;
   private native int get(long handle, byte[] key, int keyOffset, int keyLength,
-      byte[] value, int valueOffset, int valueLength) throws LogException;
+      byte[] value, int valueOffset, int valueLength) throws CruzDBException;
   private native byte[] get(long handle, byte[] key, int keyOffset,
-      int keyLength) throws LogException;
+      int keyLength) throws CruzDBException;
   private native void delete(long handle, byte[] key, int keyOffset,
-      int keyLength) throws LogException;
+      int keyLength) throws CruzDBException;
   private native long iterator(long handle);
   private native long transaction(long handle);
 }

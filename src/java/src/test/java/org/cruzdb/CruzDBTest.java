@@ -1,31 +1,30 @@
 package org.cruzdb;
 
-import com.cruzdb.Log;
-
-import java.util.Random;
-
 import static org.junit.Assert.*;
-import org.junit.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import java.util.Random;
+import org.junit.*;
+import org.cruzdb.zlog.Log;
+import org.cruzdb.zlog.LogException;
 
-public class LogTest {
+public class CruzDBTest {
 
   @Test
-  public void dbOpen() throws LogException, com.cruzdb.LogException {
+  public void dbOpen() throws LogException, CruzDBException {
     Random rand = new Random();
     String logname = "" + rand.nextInt();
     Log log = Log.openLMDB(logname);
 
-    DB db = DB.open(log, true);
+    CruzDB db = CruzDB.open(log, true);
   }
 
   @Test
-  public void put() throws LogException, com.cruzdb.LogException {
+  public void put() throws LogException, CruzDBException {
     Random rand = new Random();
     String logname = "" + rand.nextInt();
     Log log = Log.openLMDB(logname);
 
-    DB db = DB.open(log, true);
+    CruzDB db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value".getBytes());
     assertArrayEquals(db.get("key1".getBytes()), "value".getBytes());
 
@@ -33,12 +32,12 @@ public class LogTest {
   }
 
   @Test
-  public void iterator() throws LogException, com.cruzdb.LogException {
+  public void iterator() throws LogException, CruzDBException {
     Random rand = new Random();
     String logname = "" + rand.nextInt();
     Log log = Log.openLMDB(logname);
 
-    DB db = DB.open(log, true);
+    CruzDB db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value1".getBytes());
     db.put("key2".getBytes(), "value2".getBytes());
 
@@ -68,12 +67,12 @@ public class LogTest {
   }
 
   @Test
-  public void txn() throws LogException, com.cruzdb.LogException {
+  public void txn() throws LogException, CruzDBException {
     Random rand = new Random();
     String logname = "" + rand.nextInt();
     Log log = Log.openLMDB(logname);
 
-    DB db = DB.open(log, true);
+    CruzDB db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value1".getBytes());
     db.put("key2".getBytes(), "value2".getBytes());
 

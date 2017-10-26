@@ -5,10 +5,10 @@ include(UseJava)
 add_subdirectory(native)
 
 set(java_srcs
-  src/main/java/org/cruzdb/LogException.java
+  src/main/java/org/cruzdb/CruzDBException.java
   src/main/java/org/cruzdb/NativeLibraryLoader.java
-  src/main/java/org/cruzdb/ZObject.java
-  src/main/java/org/cruzdb/DB.java
+  src/main/java/org/cruzdb/CruzObject.java
+  src/main/java/org/cruzdb/CruzDB.java
   src/main/java/org/cruzdb/CruzIterator.java
   src/main/java/org/cruzdb/Transaction.java)
 
@@ -20,10 +20,10 @@ add_jar(cruzdb_jar
 install_jar(cruzdb_jar share/java)
 
 set(java_classes
-  org.cruzdb.LogException
+  org.cruzdb.CruzDBException
   org.cruzdb.NativeLibraryLoader
-  org.cruzdb.ZObject
-  org.cruzdb.DB
+  org.cruzdb.CruzObject
+  org.cruzdb.CruzDB
   org.cruzdb.CruzIterator
   org.cruzdb.Transaction)
 
@@ -81,23 +81,26 @@ endif()
 # TODO:
 #   https://cmake.org/Wiki/CMake_FAQ#How_can_I_generate_a_source_file_during_the_build.3F
 #
-set(java_db_h native/org_cruzdb_DB.h)
+set(java_db_h native/org_cruzdb_CruzDB.h)
 add_custom_command(
   OUTPUT ${java_db_h}
   DEPENDS ${java_srcs}
-  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${ZLOG_JAVA}:${cruzdb_jar_path} -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_db_h} org.cruzdb.DB)
+  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${ZLOG_JAVA}:${cruzdb_jar_path} 
+    -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_db_h} org.cruzdb.CruzDB)
 
 set(java_it_h native/org_cruzdb_CruzIterator.h)
 add_custom_command(
   OUTPUT ${java_it_h}
   DEPENDS ${java_srcs}
-  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${cruzdb_jar_path} -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_it_h} org.cruzdb.CruzIterator)
+  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${cruzdb_jar_path}
+    -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_it_h} org.cruzdb.CruzIterator)
 
 set(java_txn_h native/org_cruzdb_Transaction.h)
 add_custom_command(
   OUTPUT ${java_txn_h}
   DEPENDS ${java_srcs}
-  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${cruzdb_jar_path} -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_txn_h} org.cruzdb.Transaction)
+  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${cruzdb_jar_path}
+    -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_txn_h} org.cruzdb.Transaction)
 
 add_custom_target(
   jni_headers
@@ -107,7 +110,7 @@ add_dependencies(jni_headers cruzdb_jar)
 set(CMAKE_JAVA_INCLUDE_PATH ${JAVA_TESTCLASSPATH} ${cruzdb_jar_path})
 set(java_test_srcs
   src/test/java/org/cruzdb/AllTests.java
-  src/test/java/org/cruzdb/LogTest.java)
+  src/test/java/org/cruzdb/CruzDBTest.java)
 add_jar(cruzdb-test
   SOURCES ${java_test_srcs}
   INCLUDE_JARS ${ZLOG_JAVA})
@@ -118,8 +121,8 @@ create_javadoc(cruzdb
   PACKAGES org.cruzdb
   SOURCEPATH ${CMAKE_CURRENT_SOURCE_DIR}/src/main/java
   CLASSPATH ${ZLOG_JAVA}
-  WINDOWTITLE "ZLogJava"
-  DOCTITLE "<h1>ZLog</h1>"
+  WINDOWTITLE "CruzDB Java"
+  DOCTITLE "<h1>CruzDB</h1>"
   AUTHOR FALSE
   USE TRUE
   VERSION FALSE)

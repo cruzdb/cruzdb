@@ -1,12 +1,13 @@
 package org.cruzdb;
 
-public abstract class ZObject {
-  protected ZObject() {
+public abstract class CruzObject {
+
+  protected CruzObject() {
     nativeHandle_ = 0;
     owningHandle_ = true;
   }
 
-  protected ZObject(long handle) {
+  protected CruzObject(long handle) {
     nativeHandle_ = handle;
     owningHandle_ = true;
   }

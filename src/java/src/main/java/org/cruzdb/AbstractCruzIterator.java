@@ -1,6 +1,6 @@
 package org.cruzdb;
 
-public abstract class AbstractCruzIterator<P extends ZObject>
-    extends ZObject {
+public abstract class AbstractCruzIterator<P extends CruzObject>
+    extends CruzObject {
 
 }

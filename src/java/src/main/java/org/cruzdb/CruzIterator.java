@@ -1,7 +1,7 @@
 package org.cruzdb;
 
-public class CruzIterator extends ZObject {
-  final DB db;
+public class CruzIterator extends CruzObject {
+  final CruzDB db;
 
   @Override
   protected void disposeInternal() {
@@ -11,7 +11,7 @@ public class CruzIterator extends ZObject {
     }
   }
 
-  CruzIterator(DB db, long nativeHandle) {
+  CruzIterator(CruzDB db, long nativeHandle) {
     super(nativeHandle);
     this.db = db;
   }
