@@ -3,6 +3,7 @@ package org.cruzdb;
 import static org.junit.Assert.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Random;
+import java.util.HashMap;
 import org.junit.*;
 import org.cruzdb.zlog.Log;
 import org.cruzdb.zlog.LogException;
@@ -13,7 +14,10 @@ public class CruzDBTest {
   public void dbOpen() throws LogException, CruzDBException {
     Random rand = new Random();
     String logname = "" + rand.nextInt();
-    Log log = Log.openLMDB(logname);
+
+    HashMap<String, String> opts = new HashMap<String, String>();
+    opts.put("path", "db");
+    Log log = Log.open("lmdb", opts, logname);
 
     CruzDB db = CruzDB.open(log, true);
   }
@@ -22,7 +26,10 @@ public class CruzDBTest {
   public void put() throws LogException, CruzDBException {
     Random rand = new Random();
     String logname = "" + rand.nextInt();
-    Log log = Log.openLMDB(logname);
+
+    HashMap<String, String> opts = new HashMap<String, String>();
+    opts.put("path", "db");
+    Log log = Log.open("lmdb", opts, logname);
 
     CruzDB db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value".getBytes());
@@ -35,7 +42,10 @@ public class CruzDBTest {
   public void iterator() throws LogException, CruzDBException {
     Random rand = new Random();
     String logname = "" + rand.nextInt();
-    Log log = Log.openLMDB(logname);
+
+    HashMap<String, String> opts = new HashMap<String, String>();
+    opts.put("path", "db");
+    Log log = Log.open("lmdb", opts, logname);
 
     CruzDB db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value1".getBytes());
@@ -70,7 +80,10 @@ public class CruzDBTest {
   public void txn() throws LogException, CruzDBException {
     Random rand = new Random();
     String logname = "" + rand.nextInt();
-    Log log = Log.openLMDB(logname);
+
+    HashMap<String, String> opts = new HashMap<String, String>();
+    opts.put("path", "db");
+    Log log = Log.open("lmdb", opts, logname);
 
     CruzDB db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value1".getBytes());
