@@ -1,6 +1,6 @@
 import sphinx_rtd_theme
 
-project = u'zlog'
+project = u'cruzdb'
 source_suffix = '.rst'
 master_doc = 'index'
 pygments_style = 'sphinx'
@@ -16,7 +16,7 @@ html_theme_options = {
 html_context = {
     'display_github': True,
     'github_user': 'noahdesu',
-    'github_repo': 'zlog',
+    'github_repo': 'cruzdb',
     'github_version': 'master',
     'conf_py_path': '/doc/',
 }
