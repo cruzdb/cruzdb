@@ -34,23 +34,11 @@ endif()
 
 # check dependencies
 find_package(Boost COMPONENTS system program_options REQUIRED)
-find_package(LMDB REQUIRED)
-
-include(CheckIncludeFile)
-CHECK_INCLUDE_FILE(rados/objclass.h HAVE_RADOS_OBJECT_CLASS_H)
+find_package(ZLOG REQUIRED)
 
 find_package(Protobuf REQUIRED)
 if(NOT PROTOBUF_PROTOC_EXECUTABLE)
   message(FATAL_ERROR "cannot find protobuf compiler")
-endif()
-
-find_package(librados)
-option(WITH_CEPH "Build Ceph backend" OFF)
-if(${LIBRADOS_FOUND})
-  message(STATUS "Building Ceph backend ${LIBRADOS_LIBRARIES}")
-  set(BUILD_CEPH_BACKEND TRUE)
-elseif(WITH_CEPH)
-  message(FATAL_ERROR "Cannot find librados")
 endif()
 
 find_package(Backtrace)

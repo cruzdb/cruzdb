@@ -7,11 +7,11 @@ set -x
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   brew update || true
-  brew install boost protobuf cmake lmdb || true
+  brew install git || true
   exit 0
 fi
 
-ZLOG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if test $(id -u) != 0 ; then
   SUDO=sudo
@@ -20,10 +20,7 @@ fi
 function debs() {
   $SUDO apt-get update
   $SUDO env DEBIAN_FRONTEND=noninteractive \
-    apt-get install -y cmake libprotobuf-dev \
-      protobuf-compiler libboost-system-dev \
-      libboost-program-options-dev lcov \
-      default-jdk
+    apt-get install -y git
 }
 
 function rpms() {
@@ -34,9 +31,7 @@ function rpms() {
     $SUDO dnf install -y 'dnf-command(builddep)'
     builddepcmd="dnf -y builddep --allowerasing"
   fi
-  $SUDO $yumdnf install -y cmake gcc-c++ boost-devel \
-    protobuf-devel protobuf-compiler java-devel lcov \
-    libatomic python-virtualenv
+  $SUDO $yumdnf install -y git
 }
 
 source /etc/os-release

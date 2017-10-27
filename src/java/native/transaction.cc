@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <jni.h>
 
-#include "com_cruzdb_Transaction.h"
-#include "zlog/transaction.h"
+#include "org_cruzdb_Transaction.h"
+#include "cruzdb/transaction.h"
 #include "portal.h"
 
 // TODO: put in common location
@@ -27,17 +27,17 @@ static jbyteArray copyBytes(JNIEnv* env, std::string bytes) {
   return jbytes;
 }
 
-void Java_com_cruzdb_Transaction_disposeInternal
+void Java_org_cruzdb_Transaction_disposeInternal
   (JNIEnv *env, jobject jtxn, jlong jtxnHandle)
 {
-  delete reinterpret_cast<Transaction*>(jtxnHandle);
+  delete reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
 }
 
-void Java_com_cruzdb_Transaction_put(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
+void Java_org_cruzdb_Transaction_put(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength, jbyteArray jval,
     jint jvalOffset, jint jvalLength)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
 
   jbyte *key = new jbyte[jkeyLength];
   env->GetByteArrayRegion(jkey, jkeyOffset, jkeyLength, key);
@@ -63,10 +63,10 @@ void Java_com_cruzdb_Transaction_put(JNIEnv *env, jobject jtxn, jlong jtxnHandle
   delete [] key;
 }
 
-jbyteArray Java_com_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
+jbyteArray Java_org_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
     jlong jtxnHandle, jbyteArray jkey, jint jkeyOffset, jint jkeyLength)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
 
   jbyte *key = new jbyte[jkeyLength];
   env->GetByteArrayRegion(jkey, jkeyOffset, jkeyLength, key);
@@ -86,7 +86,7 @@ jbyteArray Java_com_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
     return nullptr;
 
   if (ret) {
-    ZlogExceptionJni::ThrowNew(env, ret);
+    CruzDBExceptionJni::ThrowNew(env, ret);
     return nullptr;
   }
 
@@ -96,10 +96,10 @@ jbyteArray Java_com_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
   return jret_value;
 }
 
-void Java_com_cruzdb_DB_delete(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
+void Java_org_cruzdb_Transaction_delete(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
 
   jbyte *key = new jbyte[jkeyLength];
   env->GetByteArrayRegion(jkey, jkeyOffset, jkeyLength, key);
@@ -115,16 +115,16 @@ void Java_com_cruzdb_DB_delete(JNIEnv *env, jobject jtxn, jlong jtxnHandle,
   delete [] key;
 }
 
-void Java_com_cruzdb_Transaction_commit(JNIEnv *env, jobject jtxn,
+void Java_org_cruzdb_Transaction_commit(JNIEnv *env, jobject jtxn,
     jlong jtxnHandle)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
   txn->Commit();
 }
 
-void Java_com_cruzdb_Transaction_abort(JNIEnv *env, jobject jtxn,
+void Java_org_cruzdb_Transaction_abort(JNIEnv *env, jobject jtxn,
     jlong jtxnHandle)
 {
-  auto *txn = reinterpret_cast<Transaction*>(jtxnHandle);
+  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
   txn->Abort();
 }

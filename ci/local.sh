@@ -4,14 +4,14 @@ set -e
 set -x
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ZLOG_DIR=${THIS_DIR}/../
+ROOT_DIR=${THIS_DIR}/../
 
-export TRAVIS_BRANCH=
-export TRAVIS_OS_NAME="linux"
-export DOCKER_IMAGE=ubuntu:xenial
-export TRAVIS_BUILD_DIR=${ZLOG_DIR}
+DOCKER_IMAGES="
+ubuntu:xenial
+fedora:26
+"
 
-trap "docker kill micro-osd ceph-plugin-built; docker rm micro-osd ceph-plugin-built" EXIT
-
-ci/before_install.sh
-ci/script.sh
+for img in ${DOCKER_IMAGES}; do
+  DOCKER_IMAGE=${img} SOURCE_DIR=${ROOT_DIR} \
+    RUN_COVERAGE=0 ci/script.sh
+done

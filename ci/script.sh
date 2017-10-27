@@ -9,12 +9,12 @@ if [ "${RUN_COVERAGE}" == 1 ]; then
 fi
 
 if [ ! -z ${DOCKER_IMAGE+x} ]; then
-  docker run --net=host --rm -v ${TRAVIS_BUILD_DIR}:/zlog:z,ro \
-    -w /zlog ${COVERAGE_ENV} -e RUN_COVERAGE \
-    -v /tmp/micro-osd:/tmp/micro-osd:z ${DOCKER_IMAGE} \
-    /bin/bash -c "env && ./install-deps.sh && ./ci/install-ceph.sh && ./ci/run.sh"
+  docker run --rm -v ${SOURCE_DIR}:/cruzdb:z,ro \
+    -w /cruzdb ${COVERAGE_ENV} -e RUN_COVERAGE \
+    ${DOCKER_IMAGE} /bin/bash -c "env && ./ci/before-install.sh && ./ci/install-zlog.sh && ./install-deps.sh && ./ci/run.sh"
 else
-  ${TRAVIS_BUILD_DIR}/install-deps.sh
-  ${TRAVIS_BUILD_DIR}/ci/install-ceph.sh
-  ${TRAVIS_BUILD_DIR}/ci/run.sh
+  ${SOURCE_DIR}/ci/before-install.sh
+  ${SOURCE_DIR}/ci/install-zlog.sh
+  ${SOURCE_DIR}/install-deps.sh
+  ${SOURCE_DIR}/ci/run.sh
 fi

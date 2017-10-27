@@ -1,2 +1,5 @@
-native/com_cruzdb_*.h
-libzlogjni.so*
+native/org_cruzdb_*.h
+cruzdb.jar
+cruzdb-test.jar
+test-libs
+javadoc

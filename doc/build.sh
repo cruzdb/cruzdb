@@ -4,8 +4,8 @@
 set -e
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ZLOG_DIR=${THIS_DIR}/../
-OUTPUT_DIR=${1:-"${ZLOG_DIR}/build-doc"}
+ROOT_DIR=${THIS_DIR}/../
+OUTPUT_DIR=${1:-"${ROOT_DIR}/build-doc"}
 
 for command in virtualenv; do
   command -v "$command" > /dev/null;
@@ -27,21 +27,21 @@ if [ ! -e ${OUTPUT_DIR}/virtualenv ]; then
 fi
 
 ${OUTPUT_DIR}/virtualenv/bin/pip install --quiet \
-  -r ${ZLOG_DIR}/doc/requirements.txt
+  -r ${ROOT_DIR}/doc/requirements.txt
 
 mkdir -p ${OUTPUT_DIR}/output/html
 ${OUTPUT_DIR}/virtualenv/bin/sphinx-build -W -a -n -b dirhtml \
-  -d ${OUTPUT_DIR}/doctrees ${ZLOG_DIR}/doc ${OUTPUT_DIR}/output/html
+  -d ${OUTPUT_DIR}/doctrees ${ROOT_DIR}/doc ${OUTPUT_DIR}/output/html
 
 BUILD_DIR=$(mktemp -d)
 trap "rm -rf ${BUILD_DIR}" EXIT
 
 pushd ${BUILD_DIR}
-cmake -DWITH_JNI=ON ${ZLOG_DIR}
-make zlog_javadoc
+cmake -DWITH_JNI=ON ${ROOT_DIR}
+make cruzdb_javadoc
 popd
 
 JAVADOC_OUTDIR=${OUTPUT_DIR}/output/html/api/java
 mkdir -p ${JAVADOC_OUTDIR}
-cp -a ${BUILD_DIR}/src/java/javadoc/zlog/* ${JAVADOC_OUTDIR}
+cp -a ${BUILD_DIR}/src/java/javadoc/cruzdb/* ${JAVADOC_OUTDIR}
 rm -rf ${BUILD_DIR}
