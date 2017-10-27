@@ -47,6 +47,7 @@ matrix:
     - os: linux
       env: DOCKER_IMAGE=ubuntu:zesty RUN_COVERAGE=1
     - os: osx
+      env: OSX_BUILD=1
 
 # the coverity build runs in the standard travis environment (job config #1
 # from the build matrix) and needs to have the proper dependencies installed.

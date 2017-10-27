@@ -18,3 +18,4 @@ make
 | Fedora 24        | [![status](https://badges.herokuapp.com/travis/cruzdb/cruzdb?env=DOCKER_IMAGE=fedora:24&label=fedora:24)](https://travis-ci.org/cruzdb/cruzdb) |
 | Fedora 25        | [![status](https://badges.herokuapp.com/travis/cruzdb/cruzdb?env=DOCKER_IMAGE=fedora:25&label=fedora:25)](https://travis-ci.org/cruzdb/cruzdb) |
 | Fedora 26        | [![status](https://badges.herokuapp.com/travis/cruzdb/cruzdb?env=DOCKER_IMAGE=fedora:26&label=fedora:26)](https://travis-ci.org/cruzdb/cruzdb) |
+| macOS            | [![status](https://badges.herokuapp.com/travis/cruzdb/cruzdb?env=OSX_BUILD=1&label=macOS)](https://travis-ci.org/cruzdb/cruzdb) |
