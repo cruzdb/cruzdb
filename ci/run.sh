@@ -58,7 +58,7 @@ done
 if [[ "$OSTYPE" != "darwin"* ]]; then
   pushd ${BUILD_DIR}/src/java
 
-  export LD_LIBRARY_PATH=${INSTALL_DIR}/lib:${INSTALL_DIR}/lib64:$LD_LIBRARY_PATH
+  export LD_LIBRARY_PATH=${INSTALL_DIR}/lib:${INSTALL_DIR}/lib64:${INSTALL_DIR}/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
   # i'm giving up for the time being on how to fix a dynamic library loading
   # issue that is only showing up on debian jessie. see issue #143

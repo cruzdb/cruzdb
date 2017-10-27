@@ -2,7 +2,8 @@
 #include <iostream>
 #include <iomanip>
 #include <map>
-#include <cstdlib>
+#include <stdlib.h>
+#include <unistd.h>
 #include "cruzdb/db.h"
 
 #define MAX_KEY 1000
