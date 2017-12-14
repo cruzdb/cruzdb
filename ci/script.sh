@@ -43,6 +43,7 @@ if [ ! -z ${DOCKER_IMAGE+x} ]; then
 
 else
   ${ROOT_DIR}/ci/before-install.sh
+  ${ROOT_DIR}/ci/install-zlog-deps.sh
   ${ROOT_DIR}/ci/install-zlog.sh
   ${ROOT_DIR}/install-deps.sh
   ${ROOT_DIR}/ci/run.sh
