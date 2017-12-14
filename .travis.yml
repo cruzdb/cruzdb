@@ -55,10 +55,10 @@ matrix:
 # dependency installation.
 before_install:
   - if [ $TRAVIS_BRANCH == coverity_scan ] && [ ${TRAVIS_JOB_NUMBER##*.} == 1 ]; then \
-      ./ci/install-zlog.sh && ./install-deps.sh; fi
+      ./ci/install-zlog-deps.sh && ./ci/install-zlog.sh && ./install-deps.sh; fi
   - if [ $TRAVIS_BRANCH == coverity_scan ] && [ ${TRAVIS_JOB_NUMBER##*.} != 1 ]; then exit 0; fi
 
 # build and testing is skipped for coverity builds
 script:
   - test $TRAVIS_BRANCH != coverity_scan || exit 0
-  - SOURCE_DIR=${TRAVIS_BUILD_DIR} ci/script.sh
+  - ci/script.sh

@@ -12,6 +12,5 @@ fedora:26
 "
 
 for img in ${DOCKER_IMAGES}; do
-  DOCKER_IMAGE=${img} SOURCE_DIR=${ROOT_DIR} \
-    RUN_COVERAGE=0 ci/script.sh
+  DOCKER_IMAGE=${img} RUN_COVERAGE=0 ci/script.sh
 done
