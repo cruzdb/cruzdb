@@ -50,7 +50,7 @@ class DB {
   /*
    * Lookup a key in the latest committed database snapshot.
    */
-  virtual int Get(const Slice& key, std::string *value) = 0;
+  virtual int Get(const zlog::Slice& key, std::string *value) = 0;
 
   /*
    *

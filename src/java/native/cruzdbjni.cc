@@ -67,8 +67,8 @@ void Java_org_cruzdb_CruzDB_put(JNIEnv *env, jobject jdb, jlong jdbHandle,
     return;
   }
 
-  Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
-  Slice value_slice(reinterpret_cast<char*>(value), jvalLength);
+  zlog::Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
+  zlog::Slice value_slice(reinterpret_cast<char*>(value), jvalLength);
 
   auto txn = db->BeginTransaction();
   txn->Put(key_slice, value_slice);
@@ -92,7 +92,7 @@ jint Java_org_cruzdb_CruzDB_get(JNIEnv *env, jobject jdb, jlong jdbHandle,
     return -2;
   }
 
-  Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
+  zlog::Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
 
   std::string value;
   int ret = db->Get(key_slice, &value);
@@ -126,7 +126,7 @@ jbyteArray Java_org_cruzdb_CruzDB_get__J_3BII
     return nullptr;
   }
 
-  Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
+  zlog::Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
 
   std::string value;
   int ret = db->Get(key_slice, &value);
@@ -154,7 +154,7 @@ void Java_org_cruzdb_CruzDB_delete(JNIEnv *env, jobject jdb, jlong jdbHandle,
     return;
   }
 
-  Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
+  zlog::Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
 
   auto *txn = db->BeginTransaction();
   txn->Delete(key_slice);

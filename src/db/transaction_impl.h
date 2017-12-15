@@ -31,9 +31,9 @@ class TransactionImpl : public Transaction {
       Abort();
   }
 
-  virtual void Put(const Slice& key, const Slice& value) override;
-  virtual void Delete(const Slice& key) override;
-  virtual int Get(const Slice& key, std::string *value) override;
+  virtual void Put(const zlog::Slice& key, const zlog::Slice& value) override;
+  virtual void Delete(const zlog::Slice& key) override;
+  virtual int Get(const zlog::Slice& key, std::string *value) override;
   virtual void Commit() override;
   virtual void Abort() override;
 
@@ -130,7 +130,7 @@ class TransactionImpl : public Transaction {
   }
 
   SharedNodeRef insert_recursive(std::deque<SharedNodeRef>& path,
-      const Slice& key, const Slice& value, const SharedNodeRef& node);
+      const zlog::Slice& key, const zlog::Slice& value, const SharedNodeRef& node);
 
   template<typename ChildA, typename ChildB>
   void insert_balance(SharedNodeRef& parent, SharedNodeRef& nn,
@@ -141,7 +141,7 @@ class TransactionImpl : public Transaction {
       ChildA child_a, ChildB child_b, SharedNodeRef& root);
 
   SharedNodeRef delete_recursive(std::deque<SharedNodeRef>& path,
-      const Slice& key, const SharedNodeRef& node);
+      const zlog::Slice& key, const SharedNodeRef& node);
 
   void transplant(SharedNodeRef parent, SharedNodeRef removed,
       SharedNodeRef transplanted, SharedNodeRef& root);

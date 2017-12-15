@@ -65,7 +65,7 @@ void IteratorImpl::SeekToLast()
   dir = Reverse;
 }
 
-void IteratorImpl::Seek(const Slice& key)
+void IteratorImpl::Seek(const zlog::Slice& key)
 {
   IteratorTraceApplier ta(snapshot_->db);
 
@@ -75,7 +75,7 @@ void IteratorImpl::Seek(const Slice& key)
 
   SharedNodeRef node = snapshot_->root.ref(ta.trace);
   while (node != Node::Nil()) {
-    int cmp = key.compare(Slice(node->key().data(),
+    int cmp = key.compare(zlog::Slice(node->key().data(),
           node->key().size()));
     if (cmp == 0) {
       stack_.push(node);
@@ -88,13 +88,13 @@ void IteratorImpl::Seek(const Slice& key)
   }
 
   assert(stack_.empty() ||
-      Slice(stack_.top()->key().data(),
+      zlog::Slice(stack_.top()->key().data(),
         stack_.top()->key().size()).compare(key) >= 0);
 
   dir = Forward;
 }
 
-void IteratorImpl::SeekForward(const Slice& key)
+void IteratorImpl::SeekForward(const zlog::Slice& key)
 {
   IteratorTraceApplier ta(snapshot_->db);
 
@@ -104,7 +104,7 @@ void IteratorImpl::SeekForward(const Slice& key)
 
   SharedNodeRef node = snapshot_->root.ref(ta.trace);
   while (node != Node::Nil()) {
-    int cmp = key.compare(Slice(node->key().data(),
+    int cmp = key.compare(zlog::Slice(node->key().data(),
           node->key().size()));
     if (cmp == 0) {
       stack_.push(node);
@@ -117,13 +117,13 @@ void IteratorImpl::SeekForward(const Slice& key)
   }
 
   assert(stack_.empty() ||
-      Slice(stack_.top()->key().data(),
+      zlog::Slice(stack_.top()->key().data(),
         stack_.top()->key().size()).compare(key) == 0);
 
   dir = Forward;
 }
 
-void IteratorImpl::SeekPrevious(const Slice& key)
+void IteratorImpl::SeekPrevious(const zlog::Slice& key)
 {
   IteratorTraceApplier ta(snapshot_->db);
 
@@ -133,7 +133,7 @@ void IteratorImpl::SeekPrevious(const Slice& key)
 
   SharedNodeRef node = snapshot_->root.ref(ta.trace);
   while (node != Node::Nil()) {
-    int cmp = key.compare(Slice(node->key().data(),
+    int cmp = key.compare(zlog::Slice(node->key().data(),
           node->key().size()));
     if (cmp == 0) {
       stack_.push(node);
@@ -147,7 +147,7 @@ void IteratorImpl::SeekPrevious(const Slice& key)
   }
 
   assert(stack_.empty() ||
-      Slice(stack_.top()->key().data(),
+      zlog::Slice(stack_.top()->key().data(),
         stack_.top()->key().size()).compare(key) == 0);
 
   dir = Reverse;
@@ -189,17 +189,17 @@ void IteratorImpl::Prev()
   }
 }
 
-Slice IteratorImpl::key() const
+zlog::Slice IteratorImpl::key() const
 {
   assert(Valid());
-  return Slice(stack_.top()->key().data(),
+  return zlog::Slice(stack_.top()->key().data(),
       stack_.top()->key().size());
 }
 
-Slice IteratorImpl::value() const
+zlog::Slice IteratorImpl::value() const
 {
   assert(Valid());
-  return Slice(stack_.top()->val().data(),
+  return zlog::Slice(stack_.top()->val().data(),
       stack_.top()->val().size());
 }
 
