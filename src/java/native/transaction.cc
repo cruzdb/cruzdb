@@ -54,8 +54,8 @@ void Java_org_cruzdb_Transaction_put(JNIEnv *env, jobject jtxn, jlong jtxnHandle
     return;
   }
 
-  Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
-  Slice value_slice(reinterpret_cast<char*>(value), jvalLength);
+  zlog::Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
+  zlog::Slice value_slice(reinterpret_cast<char*>(value), jvalLength);
 
   txn->Put(key_slice, value_slice);
 
@@ -75,7 +75,7 @@ jbyteArray Java_org_cruzdb_Transaction_get(JNIEnv *env, jobject jtxn,
     return nullptr;
   }
 
-  Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
+  zlog::Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
 
   std::string value;
   int ret = txn->Get(key_slice, &value);
@@ -108,7 +108,7 @@ void Java_org_cruzdb_Transaction_delete(JNIEnv *env, jobject jtxn, jlong jtxnHan
     return;
   }
 
-  Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
+  zlog::Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
 
   txn->Delete(key_slice);
 

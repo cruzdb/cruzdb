@@ -26,7 +26,7 @@ class IteratorImpl : public Iterator {
   // Position at the first key in the source that at or past target
   // The iterator is Valid() after this call iff the source contains
   // an entry that comes at or past target.
-  void Seek(const Slice& target) override;
+  void Seek(const zlog::Slice& target) override;
 
   // Moves to the next entry in the source.  After this call, Valid() is
   // true iff the iterator was not positioned at the last entry in the source.
@@ -42,13 +42,13 @@ class IteratorImpl : public Iterator {
   // the returned slice is valid only until the next modification of
   // the iterator.
   // REQUIRES: Valid()
-  Slice key() const override;
+  zlog::Slice key() const override;
 
   // Return the value for the current entry.  The underlying storage for
   // the returned slice is valid only until the next modification of
   // the iterator.
   // REQUIRES: !AtEnd() && !AtStart()
-  Slice value() const override;
+  zlog::Slice value() const override;
 
 #if 0
   // If an error has occurred, return it.  Else return an ok status.
@@ -79,8 +79,8 @@ class IteratorImpl : public Iterator {
     Reverse
   };
 
-  void SeekForward(const Slice& target);
-  void SeekPrevious(const Slice& target);
+  void SeekForward(const zlog::Slice& target);
+  void SeekPrevious(const zlog::Slice& target);
 
   std::stack<SharedNodeRef> stack_; // curr or unvisited parents
   Snapshot *snapshot_;

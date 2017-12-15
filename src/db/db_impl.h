@@ -48,7 +48,7 @@ class DBImpl : public DB {
     return new IteratorImpl(snapshot);
   }
 
-  int Get(const Slice& key, std::string *value) override;
+  int Get(const zlog::Slice& key, std::string *value) override;
 
   int RestoreFromLog();
 

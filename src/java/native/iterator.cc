@@ -57,7 +57,7 @@ void Java_org_cruzdb_CruzIterator_seek0
   if (key == nullptr)
     return;
 
-  Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
+  zlog::Slice key_slice(reinterpret_cast<char*>(key), jkeyLength);
 
   auto *it = reinterpret_cast<cruzdb::Iterator*>(jitHandle);
   it->Seek(key_slice);
@@ -69,7 +69,7 @@ jbyteArray Java_org_cruzdb_CruzIterator_key0(JNIEnv *env,
     jobject jit, jlong jitHandle)
 {
   auto *it = reinterpret_cast<cruzdb::Iterator*>(jitHandle);
-  Slice key_slice = it->key();
+  zlog::Slice key_slice = it->key();
   jbyteArray jkey = env->NewByteArray(static_cast<jsize>(key_slice.size()));
   if (jkey == nullptr)
     return nullptr;
@@ -82,7 +82,7 @@ jbyteArray Java_org_cruzdb_CruzIterator_value0(JNIEnv *env,
     jobject jit, jlong jitHandle)
 {
   auto *it = reinterpret_cast<cruzdb::Iterator*>(jitHandle);
-  Slice value_slice = it->value();
+  zlog::Slice value_slice = it->value();
   jbyteArray jvalue = env->NewByteArray(static_cast<jsize>(value_slice.size()));
   if (jvalue == nullptr)
     return nullptr;

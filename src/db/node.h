@@ -144,7 +144,7 @@ class Node {
   NodePtr right;
 
   // TODO: allow rid to have negative initialization value
-  Node(const Slice& key, const Slice& val, bool red, SharedNodeRef lr, SharedNodeRef rr,
+  Node(const zlog::Slice& key, const zlog::Slice& val, bool red, SharedNodeRef lr, SharedNodeRef rr,
       uint64_t rid, bool read_only, DBImpl *db) :
     left(lr, db, read_only), right(rr, db, read_only),
     key_(key.data(), key.size()), val_(val.data(), val.size()),
@@ -213,13 +213,13 @@ class Node {
   }
 
   // TODO: return const reference?
-  inline Slice key() const {
-    return Slice(key_.data(), key_.size());
+  inline zlog::Slice key() const {
+    return zlog::Slice(key_.data(), key_.size());
   }
 
   // TODO: return const reference?
-  inline Slice val() const {
-    return Slice(val_.data(), val_.size());
+  inline zlog::Slice val() const {
+    return zlog::Slice(val_.data(), val_.size());
   }
 
   inline void steal_payload(SharedNodeRef& other) {

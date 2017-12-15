@@ -48,7 +48,7 @@ void TransactionImpl::serialize_node(cruzdb_proto::Node *dst,
 }
 
 SharedNodeRef TransactionImpl::insert_recursive(std::deque<SharedNodeRef>& path,
-    const Slice& key, const Slice& value, const SharedNodeRef& node)
+    const zlog::Slice& key, const zlog::Slice& value, const SharedNodeRef& node)
 {
   assert(node != nullptr);
 
@@ -60,7 +60,7 @@ SharedNodeRef TransactionImpl::insert_recursive(std::deque<SharedNodeRef>& path,
     return nn;
   }
 
-  int cmp = key.compare(Slice(node->key().data(),
+  int cmp = key.compare(zlog::Slice(node->key().data(),
         node->key().size()));
   bool less = cmp < 0;
   bool equal = cmp == 0;
@@ -157,7 +157,7 @@ void TransactionImpl::insert_balance(SharedNodeRef& parent, SharedNodeRef& nn,
 }
 
 SharedNodeRef TransactionImpl::delete_recursive(std::deque<SharedNodeRef>& path,
-    const Slice& key, const SharedNodeRef& node)
+    const zlog::Slice& key, const SharedNodeRef& node)
 {
   assert(node != nullptr);
 
@@ -165,7 +165,7 @@ SharedNodeRef TransactionImpl::delete_recursive(std::deque<SharedNodeRef>& path,
     return nullptr;
   }
 
-  int cmp = key.compare(Slice(node->key().data(),
+  int cmp = key.compare(zlog::Slice(node->key().data(),
         node->key().size()));
   bool less = cmp < 0;
   bool equal = cmp == 0;
@@ -391,7 +391,7 @@ void TransactionImpl::serialize_intention(cruzdb_proto::Intention& i,
   field_index++;
 }
 
-void TransactionImpl::Put(const Slice& key, const Slice& value)
+void TransactionImpl::Put(const zlog::Slice& key, const zlog::Slice& value)
 {
   assert(!committed_);
   assert(!aborted_);
@@ -443,7 +443,7 @@ void TransactionImpl::Put(const Slice& key, const Slice& value)
   root_ = root;
 }
 
-void TransactionImpl::Delete(const Slice& key)
+void TransactionImpl::Delete(const zlog::Slice& key)
 {
   assert(!committed_);
   assert(!aborted_);
@@ -536,7 +536,7 @@ void TransactionImpl::Commit()
   WaitComplete();
 }
 
-int TransactionImpl::Get(const Slice& key, std::string* val)
+int TransactionImpl::Get(const zlog::Slice& key, std::string* val)
 {
   assert(!committed_);
   assert(!aborted_);
@@ -545,7 +545,7 @@ int TransactionImpl::Get(const Slice& key, std::string* val)
 
   auto cur = root_ == nullptr ? src_root_.ref(trace_) : root_;
   while (cur != Node::Nil()) {
-    int cmp = key.compare(Slice(cur->key().data(),
+    int cmp = key.compare(zlog::Slice(cur->key().data(),
           cur->key().size()));
     if (cmp == 0) {
       val->assign(cur->val().data(), cur->val().size());

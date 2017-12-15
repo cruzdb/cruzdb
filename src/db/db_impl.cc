@@ -299,14 +299,14 @@ void DBImpl::validate_rb_tree(NodePtr root)
   assert(_validate_rb_tree(root.ref_notrace()) != 0);
 }
 
-int DBImpl::Get(const Slice& key, std::string *value)
+int DBImpl::Get(const zlog::Slice& key, std::string *value)
 {
   auto root = root_;
   std::vector<std::pair<int64_t, int>> trace;
 
   auto cur = root.ref(trace);
   while (cur != Node::Nil()) {
-    int cmp = key.compare(Slice(cur->key().data(),
+    int cmp = key.compare(zlog::Slice(cur->key().data(),
           cur->key().size()));
     if (cmp == 0) {
       value->assign(cur->val().data(), cur->val().size());
