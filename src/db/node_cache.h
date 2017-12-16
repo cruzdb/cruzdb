@@ -46,7 +46,7 @@ class NodeCache {
     vaccum_ = std::thread(&NodeCache::do_vaccum_, this);
   }
 
-  NodePtr CacheIntention(const cruzdb_proto::Intention& i,
+  NodePtr CacheAfterImage(const cruzdb_proto::AfterImage& i,
       uint64_t pos);
   NodePtr ApplyAfterImageDelta(const std::vector<SharedNodeRef>& delta,
       uint64_t pos);
@@ -99,7 +99,7 @@ class NodeCache {
 
   //void ResolveNodePtr(NodePtr& ptr);
 
-  SharedNodeRef deserialize_node(const cruzdb_proto::Intention& i,
+  SharedNodeRef deserialize_node(const cruzdb_proto::AfterImage& i,
       uint64_t pos, int index) const;
 
   std::thread vaccum_;

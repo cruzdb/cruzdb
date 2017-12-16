@@ -6,6 +6,9 @@
 
 namespace cruzdb {
 
+// TODO: cache should enforce properties like all nodes have physical
+// addresses...
+
 // TODO: if usage goes above high marker block new txns
 static const size_t low_marker  =  4*1024*1024;
 //static const size_t high_marker = 8*1024*1024;
@@ -118,9 +121,12 @@ SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
   int ret = db_->log_->Read(csn, &snapshot);
   assert(ret == 0);
 
-  cruzdb_proto::Intention i;
-  assert(i.ParseFromString(snapshot));
-  assert(i.IsInitialized());
+  cruzdb_proto::LogEntry log_entry;
+  assert(log_entry.ParseFromString(snapshot));
+  assert(log_entry.IsInitialized());
+  assert(log_entry.msg_case() != cruzdb_proto::LogEntry::kIntention);
+  assert(log_entry.msg_case() == cruzdb_proto::LogEntry::kAfterImage);
+  auto i = log_entry.after_image();
 
   auto nn = deserialize_node(i, csn, offset);
   assert(nn->read_only());
@@ -179,7 +185,7 @@ SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
 //  ptr.set_ref(e.node);
 //}
 
-NodePtr NodeCache::CacheIntention(const cruzdb_proto::Intention& i,
+NodePtr NodeCache::CacheAfterImage(const cruzdb_proto::AfterImage& i,
     uint64_t pos)
 {
   if (i.tree_size() == 0) {
@@ -231,7 +237,7 @@ NodePtr NodeCache::CacheIntention(const cruzdb_proto::Intention& i,
   return ret;
 }
 
-SharedNodeRef NodeCache::deserialize_node(const cruzdb_proto::Intention& i,
+SharedNodeRef NodeCache::deserialize_node(const cruzdb_proto::AfterImage& i,
     uint64_t pos, int index) const
 {
   const cruzdb_proto::Node& n = i.tree(index);

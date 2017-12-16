@@ -71,7 +71,7 @@ int main(int argc, char **argv)
 
   while (true) {
     auto txn = db->BeginTransaction();
-    int nkey = dis(gen);
+    int nkey = dis(gen); //total_txn_count; //dis(gen);
     const std::string key = tostr(nkey);
     txn->Put(key, key);
     txn->Commit();

@@ -13,6 +13,68 @@ void TransactionImpl::UpdateLRU()
   db_->UpdateLRU(trace_);
 }
 
+void TransactionImpl::infect_node_ptr(NodePtr& src, int maybe_offset)
+{
+  if (src.ref_notrace() == Node::Nil()) {
+    // nothing
+  } else if (src.ref(trace_)->rid() == rid_) {
+    assert(rid_ >= 0);
+    src.set_csn(rid_);
+    src.set_csn_is_intention_pos();
+    src.set_offset(maybe_offset);
+    //std::cout << "infect csn/intention " << src.csn() << " off " << src.offset() << std::endl;
+  } else {
+    if (src.csn() < 0 || src.offset() < 0) {
+      //std::cout << "csn " << src.csn() << " off " << src.offset() << std::endl;
+      assert(src.csn() >= 0);
+      assert(src.offset() >= 0);
+    }
+  }
+}
+
+void TransactionImpl::infect_node(SharedNodeRef node,
+    int maybe_left_offset, int maybe_right_offset)
+{
+  infect_node_ptr(node->left, maybe_left_offset);
+  infect_node_ptr(node->right, maybe_right_offset);
+}
+
+void TransactionImpl::infect_after_image(SharedNodeRef node, int& field_index)
+{
+  assert(node != nullptr);
+
+  if (node == Node::Nil() || node->rid() != rid_)
+    return;
+
+  infect_after_image(node->left.ref(trace_), field_index);
+  auto maybe_left_offset = field_index - 1;
+
+  infect_after_image(node->right.ref(trace_), field_index);
+  auto maybe_right_offset = field_index - 1;
+
+  infect_node(node, maybe_left_offset, maybe_right_offset);
+  field_index++;
+}
+
+int TransactionImpl::infect_self_pointers()
+{
+  assert(committed_);
+
+  int field_index = 0;
+  assert(root_ != nullptr);
+  if (root_ == Node::Nil()) {
+    // TODO... not sure exactly what to do here. it seems like a special case
+    // that we should handle expclitly.
+    assert(0);
+  } else
+    assert(root_->rid() == rid_);
+
+  infect_after_image(root_, field_index);
+
+  assert(field_index > 0);
+  return field_index - 1;
+}
+
 void TransactionImpl::serialize_node_ptr(cruzdb_proto::NodePtr *dst,
     NodePtr& src, int maybe_offset)
 {
@@ -22,16 +84,40 @@ void TransactionImpl::serialize_node_ptr(cruzdb_proto::NodePtr *dst,
     dst->set_csn(0);
     dst->set_off(0);
   } else if (src.ref(trace_)->rid() == rid_) {
+    // if the pointer is into the current after image, that's ok. we can't have
+    // a csn/log location yet...
     dst->set_nil(false);
     dst->set_self(true);
     dst->set_csn(0);
     dst->set_off(maybe_offset);
+    // FIXME: this should be set by infection. so, we should at least assert
+    // this assumptino.
     src.set_offset(maybe_offset); // move up a level
   } else {
     assert(src.ref(trace_) != nullptr);
     dst->set_nil(false);
     dst->set_self(false);
-    dst->set_csn(src.csn());
+    // here there are two cases... either the pointer is well defined
+    // physically, or we can obtain it from the volatile pointer index to make
+    // it well defined physically...
+    //
+    // TODO: we need to make sure the serialization contains the correct
+    // physical locations for pointers. but we don't need to update the source
+    // node here... it makes more sense to serialize a copy, and then when we
+    // fold into the cache, make that a well defined point in the exection where
+    // we are handling update races...
+    //
+    // perhaps when we get ready to fold into the cahce, we just make new copies
+    // of nodes?
+    //std::cout << "XXX " << src.csn() << std::endl;
+    if (src.csn_is_intention_pos()) {
+      auto csn = db_->resolve_intention_to_csn(src.csn());
+      dst->set_csn(csn);
+      //std::cout << csn << std::endl;
+      //src.set_csn(csn); // clears intention flag
+    } else {
+      dst->set_csn(src.csn());
+    }
     dst->set_off(src.offset());
   }
 }
@@ -88,7 +174,7 @@ SharedNodeRef TransactionImpl::insert_recursive(std::deque<SharedNodeRef>& path,
   if (node->rid() == rid_)
     copy = node;
   else {
-    copy = Node::Copy(node, db_, rid_);
+    copy = Node::Copy(node, db_, rid_, max_intention_resolvable_);
     fresh_nodes_.push_back(copy);
   }
 
@@ -136,7 +222,7 @@ void TransactionImpl::insert_balance(SharedNodeRef& parent, SharedNodeRef& nn,
   NodePtr& uncle = child_b(path.front());
   if (uncle.ref(trace_)->red()) {
     if (uncle.ref(trace_)->rid() != rid_) {
-      auto n = Node::Copy(uncle.ref(trace_), db_, rid_);
+      auto n = Node::Copy(uncle.ref(trace_), db_, rid_, max_intention_resolvable_);
       fresh_nodes_.push_back(n);
       uncle.set_ref(n);
     }
@@ -175,7 +261,7 @@ SharedNodeRef TransactionImpl::delete_recursive(std::deque<SharedNodeRef>& path,
     if (node->rid() == rid_)
       copy = node;
     else {
-      copy = Node::Copy(node, db_, rid_);
+      copy = Node::Copy(node, db_, rid_, max_intention_resolvable_);
       fresh_nodes_.push_back(copy);
     }
     path.push_back(copy);
@@ -199,7 +285,7 @@ SharedNodeRef TransactionImpl::delete_recursive(std::deque<SharedNodeRef>& path,
   if (node->rid() == rid_)
     copy = node;
   else {
-    copy = Node::Copy(node, db_, rid_);
+    copy = Node::Copy(node, db_, rid_, max_intention_resolvable_);
     fresh_nodes_.push_back(copy);
   }
 
@@ -232,7 +318,7 @@ SharedNodeRef TransactionImpl::build_min_path(SharedNodeRef node, std::deque<Sha
   while (node->left.ref(trace_) != Node::Nil()) {
     assert(node->left.ref(trace_) != nullptr);
     if (node->left.ref(trace_)->rid() != rid_) {
-      auto n = Node::Copy(node->left.ref(trace_), db_, rid_);
+      auto n = Node::Copy(node->left.ref(trace_), db_, rid_, max_intention_resolvable_);
       fresh_nodes_.push_back(n);
       node->left.set_ref(n);
     }
@@ -251,7 +337,7 @@ void TransactionImpl::mirror_remove_balance(SharedNodeRef& extra_black, SharedNo
 
   if (brother->red()) {
     if (brother->rid() != rid_) {
-      auto n = Node::Copy(brother, db_, rid_);
+      auto n = Node::Copy(brother, db_, rid_, max_intention_resolvable_);
       fresh_nodes_.push_back(n);
       child_b(parent).set_ref(n);
     } else
@@ -272,7 +358,7 @@ void TransactionImpl::mirror_remove_balance(SharedNodeRef& extra_black, SharedNo
 
   if (!brother->left.ref(trace_)->red() && !brother->right.ref(trace_)->red()) {
     if (brother->rid() != rid_) {
-      auto n = Node::Copy(brother, db_, rid_);
+      auto n = Node::Copy(brother, db_, rid_, max_intention_resolvable_);
       fresh_nodes_.push_back(n);
       child_b(parent).set_ref(n);
     } else
@@ -285,7 +371,7 @@ void TransactionImpl::mirror_remove_balance(SharedNodeRef& extra_black, SharedNo
   } else {
     if (!child_b(brother).ref(trace_)->red()) {
       if (brother->rid() != rid_) {
-        auto n = Node::Copy(brother, db_, rid_);
+        auto n = Node::Copy(brother, db_, rid_, max_intention_resolvable_);
         fresh_nodes_.push_back(n);
         child_b(parent).set_ref(n);
       } else
@@ -293,7 +379,7 @@ void TransactionImpl::mirror_remove_balance(SharedNodeRef& extra_black, SharedNo
       brother = child_b(parent).ref(trace_);
 
       if (child_a(brother).ref(trace_)->rid() != rid_) {
-        auto n = Node::Copy(child_a(brother).ref(trace_), db_, rid_);
+        auto n = Node::Copy(child_a(brother).ref(trace_), db_, rid_, max_intention_resolvable_);
         fresh_nodes_.push_back(n);
         child_a(brother).set_ref(n);
       }
@@ -302,7 +388,7 @@ void TransactionImpl::mirror_remove_balance(SharedNodeRef& extra_black, SharedNo
     }
 
     if (brother->rid() != rid_) {
-      auto n = Node::Copy(brother, db_, rid_);
+      auto n = Node::Copy(brother, db_, rid_, max_intention_resolvable_);
       fresh_nodes_.push_back(n);
       child_b(parent).set_ref(n);
     } else
@@ -310,7 +396,7 @@ void TransactionImpl::mirror_remove_balance(SharedNodeRef& extra_black, SharedNo
     brother = child_b(parent).ref(trace_);
 
     if (child_b(brother).ref(trace_)->rid() != rid_) {
-      auto n = Node::Copy(child_b(brother).ref(trace_), db_, rid_);
+      auto n = Node::Copy(child_b(brother).ref(trace_), db_, rid_, max_intention_resolvable_);
       fresh_nodes_.push_back(n);
       child_b(brother).set_ref(n);
     }
@@ -347,7 +433,7 @@ void TransactionImpl::balance_delete(SharedNodeRef extra_black,
   if (extra_black->rid() == rid_)
     new_node = extra_black;
   else {
-    new_node = Node::Copy(extra_black, db_, rid_);
+    new_node = Node::Copy(extra_black, db_, rid_, max_intention_resolvable_);
     fresh_nodes_.push_back(new_node);
   }
   transplant(parent, extra_black, new_node, root);
@@ -365,7 +451,7 @@ void TransactionImpl::balance_delete(SharedNodeRef extra_black,
     new_node->set_red(false);
 }
 
-void TransactionImpl::serialize_intention(cruzdb_proto::Intention& i,
+void TransactionImpl::serialize_intention(cruzdb_proto::AfterImage& i,
     SharedNodeRef node, int& field_index, std::vector<SharedNodeRef>& delta)
 {
   assert(node != nullptr);
@@ -398,11 +484,17 @@ void TransactionImpl::Put(const zlog::Slice& key, const zlog::Slice& value)
 
   TraceApplier ta(this);
 
+  auto op = intention_.add_ops();
+  op->set_op(cruzdb_proto::TransactionOp::PUT);
+  op->set_key(key.ToString());
+  op->set_val(value.ToString());
+
   /*
    * build copy of path to new node
    */
   std::deque<SharedNodeRef> path;
 
+  //src_root_.Print();
   auto base_root = root_ == nullptr ? src_root_.ref(trace_) : root_;
   auto root = insert_recursive(path, key, value, base_root);
   if (root == nullptr) {
@@ -412,7 +504,7 @@ void TransactionImpl::Put(const zlog::Slice& key, const zlog::Slice& value)
      * step in delete or 2) update the algorithm to handle this case
      * explicitly.
      */
-    Delete(key); // first remove the key
+    DeleteNoTrack(key); // first remove the key
     path.clear(); // new path will be built
     assert(root_ != nullptr); // delete set the root
     root = insert_recursive(path, key, value, root_);
@@ -443,7 +535,17 @@ void TransactionImpl::Put(const zlog::Slice& key, const zlog::Slice& value)
   root_ = root;
 }
 
+
 void TransactionImpl::Delete(const zlog::Slice& key)
+{
+  auto op = intention_.add_ops();
+  op->set_op(cruzdb_proto::TransactionOp::DELETE);
+  op->set_key(key.ToString());
+
+  return DeleteNoTrack(key);
+}
+
+void TransactionImpl::DeleteNoTrack(const zlog::Slice& key)
 {
   assert(!committed_);
   assert(!aborted_);
@@ -486,7 +588,7 @@ void TransactionImpl::Delete(const zlog::Slice& key)
     assert(transplanted != nullptr);
     auto temp = removed;
     if (removed->right.ref(trace_)->rid() != rid_) {
-      auto n = Node::Copy(removed->right.ref(trace_), db_, rid_);
+      auto n = Node::Copy(removed->right.ref(trace_), db_, rid_, max_intention_resolvable_);
       fresh_nodes_.push_back(n);
       removed->right.set_ref(n);
     }
@@ -514,10 +616,11 @@ void TransactionImpl::Abort()
   assert(!committed_);
   assert(!aborted_);
   aborted_ = true;
-  db_->AbortTransaction(this);
+  // doesn't seem to be necessary to abort on the db side...
+  //db_->AbortTransaction(this);
 }
 
-void TransactionImpl::Commit()
+bool TransactionImpl::Commit()
 {
   assert(!committed_);
   assert(!aborted_);
@@ -526,14 +629,17 @@ void TransactionImpl::Commit()
 
   // nothing to do
   if (root_ == nullptr) {
-    db_->AbortTransaction(this);
+    // abort had been here in the days of 1 txn at a time, because when we
+    // aborted we needed to notify the db that this txn wasn't blocking anyone
+    // any longer.
+    //db_->AbortTransaction(this);
     committed_ = true;
-    completed_ = true;
-    return;
+    //completed_ = true;
+    return true; //?? special case
   }
 
-  db_->CompleteTransaction(this);
-  WaitComplete();
+  return db_->CompleteTransaction(this);
+  //WaitComplete();
 }
 
 int TransactionImpl::Get(const zlog::Slice& key, std::string* val)
@@ -542,6 +648,10 @@ int TransactionImpl::Get(const zlog::Slice& key, std::string* val)
   assert(!aborted_);
 
   TraceApplier ta(this);
+
+  auto op = intention_.add_ops();
+  op->set_op(cruzdb_proto::TransactionOp::GET);
+  op->set_key(key.ToString());
 
   auto cur = root_ == nullptr ? src_root_.ref(trace_) : root_;
   while (cur != Node::Nil()) {
@@ -557,7 +667,7 @@ int TransactionImpl::Get(const zlog::Slice& key, std::string* val)
   return -ENOENT;
 }
 
-void TransactionImpl::SerializeAfterImage(cruzdb_proto::Intention& i,
+void TransactionImpl::SerializeAfterImage(cruzdb_proto::AfterImage& i,
     std::vector<SharedNodeRef>& delta)
 {
   assert(committed_);
@@ -570,7 +680,14 @@ void TransactionImpl::SerializeAfterImage(cruzdb_proto::Intention& i,
     assert(root_->rid() == rid_);
 
   serialize_intention(i, root_, field_index, delta);
+
+  // TODO: is this subject to the must-be-defined restriciton. seems like it...
+  // but i also think we do not even use this, so maybe we can nuke it?
   i.set_snapshot(src_root_.csn());
+
+  // only valid when the transaction is being used to produce after images when
+  // processing intentions from the log.
+  i.set_intention(rid_);
 }
 
 void TransactionImpl::SetDeltaPosition(std::vector<SharedNodeRef>& delta,
@@ -579,16 +696,33 @@ void TransactionImpl::SetDeltaPosition(std::vector<SharedNodeRef>& delta,
   for (const auto nn : delta) {
     if (nn->left.ref_notrace()->rid() == rid_) {
       nn->left.set_csn(pos);
+    } else if (nn->left.ref_notrace() != Node::Nil()) {
+      if (nn->left.csn_is_intention_pos()) {
+        auto csn = db_->resolve_intention_to_csn_locked(nn->left.csn());
+        nn->left.set_csn(csn);
+      }
     }
     if (nn->right.ref_notrace()->rid() == rid_) {
       nn->right.set_csn(pos);
+    } else if (nn->right.ref_notrace() != Node::Nil()) {
+      if (nn->right.csn_is_intention_pos()) {
+        auto csn = db_->resolve_intention_to_csn_locked(nn->right.csn());
+        nn->right.set_csn(csn);
+      }
     }
   }
 
+  // i believe this had been used because the transaction was initially created
+  // wiht a negative rid, but once it was made durable, the nodes in memory were
+  // reused, and the rid is updated to reflect this. we don't use this any more,
+  // in the sense that we aren't now serializing transactions that are not
+  // comitting.
+#if 0
   // set the rid of these nodes to the log position where they are stored.
   for (auto nn : delta) {
     nn->set_rid(pos);
   }
+#endif
 }
 
 }

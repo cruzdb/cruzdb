@@ -14,16 +14,27 @@ class DBImpl;
  */
 class TransactionImpl : public Transaction {
  public:
-  TransactionImpl(DBImpl *db, NodePtr root, int64_t rid) :
+  TransactionImpl(DBImpl *db,
+      NodePtr root,
+      int64_t root_intention,
+      int64_t rid,
+      uint64_t max_intention_resolvable) :
     db_(db),
     src_root_(root),
+    root_intention_(root_intention),
     root_(nullptr),
     rid_(rid),
     committed_(false),
     aborted_(false),
-    completed_(false)
+    max_intention_resolvable_(max_intention_resolvable)
+    //completed_(false)
   {
-    assert(rid_ < 0);
+    //assert(rid_ < 0); this doesn't hold any longer because we are, silly
+    //enough, using the txn as a container for the after image when we read up
+    //the intention from the log. one of the immediate next steps will be to
+    //pull out the tree logic so its useful outside the txn context. TODO.
+    //intention_.set_snapshot(src_root_.csn());
+    intention_.set_snapshot_intention(root_intention_);
   }
 
   ~TransactionImpl() {
@@ -34,32 +45,35 @@ class TransactionImpl : public Transaction {
   virtual void Put(const zlog::Slice& key, const zlog::Slice& value) override;
   virtual void Delete(const zlog::Slice& key) override;
   virtual int Get(const zlog::Slice& key, std::string *value) override;
-  virtual void Commit() override;
+  virtual bool Commit() override;
   virtual void Abort() override;
 
  public:
-  bool Committed() const {
-    return committed_;
-  }
+  // TODO: reevaluate these uses
+  //bool Committed() const {
+  //  return committed_;
+  //}
 
-  bool Completed() const {
-    return completed_;
-  }
+  //bool Completed() const {
+  //  return completed_;
+  //}
 
   void MarkCommitted() {
     committed_ = true;
   }
 
-  void MarkComplete() {
-    lock_.lock();
-    completed_ = true;
-    lock_.unlock();
-    completed_cond_.notify_one();
-  }
-
-  void SerializeAfterImage(cruzdb_proto::Intention& i,
+  void SerializeAfterImage(cruzdb_proto::AfterImage& i,
       std::vector<SharedNodeRef>& delta);
   void SetDeltaPosition(std::vector<SharedNodeRef>& delta, uint64_t pos);
+
+  cruzdb_proto::Intention& GetIntention() {
+    return intention_;
+  }
+
+  void infect_node_ptr(NodePtr& src, int maybe_offset);
+  void infect_node(SharedNodeRef node, int maybe_left_offset, int maybe_right_offset);
+  void infect_after_image(SharedNodeRef node, int& field_index);
+  int infect_self_pointers();
 
  private:
   class TraceApplier {
@@ -81,6 +95,12 @@ class TransactionImpl : public Transaction {
   // database snapshot
   NodePtr src_root_;
 
+  // this is the address of the intention that produced src_root_. todo, make
+  // sure this is encoded into src_root when we unify things. a src_root should
+  // never exist if it wasn't produced by replaying some intention that does
+  // have a physical address.
+  int64_t root_intention_;
+
   // transaction after image
   SharedNodeRef root_;
   const int64_t rid_;
@@ -93,14 +113,13 @@ class TransactionImpl : public Transaction {
    */
   bool committed_;
   bool aborted_;
-  bool completed_;
+  //bool completed_;
+  int64_t max_intention_resolvable_;
 
-  std::condition_variable completed_cond_;
-
-  void WaitComplete() {
-    std::unique_lock<std::mutex> lk(lock_);
-    completed_cond_.wait(lk, [this]{ return completed_; });
-  }
+  //void WaitComplete() {
+  //  std::unique_lock<std::mutex> lk(lock_);
+  //  completed_cond_.wait(lk, [this]{ return completed_; });
+  //}
 
   // access trace used to update lru cache. the trace is applied and reset
   // after each operation (e.g. get/put/etc) or if the transaction accesses
@@ -120,6 +139,8 @@ class TransactionImpl : public Transaction {
   //
   std::vector<SharedNodeRef> fresh_nodes_;
 
+  cruzdb_proto::Intention intention_;
+
   static inline NodePtr& left(SharedNodeRef n) { return n->left; };
   static inline NodePtr& right(SharedNodeRef n) { return n->right; };
 
@@ -128,6 +149,8 @@ class TransactionImpl : public Transaction {
     d.pop_front();
     return front;
   }
+
+  void DeleteNoTrack(const zlog::Slice& key);
 
   SharedNodeRef insert_recursive(std::deque<SharedNodeRef>& path,
       const zlog::Slice& key, const zlog::Slice& value, const SharedNodeRef& node);
@@ -161,9 +184,12 @@ class TransactionImpl : public Transaction {
       int maybe_offset);
   void serialize_node(cruzdb_proto::Node *dst, SharedNodeRef node,
       int maybe_left_offset, int maybe_right_offset);
-  void serialize_intention(cruzdb_proto::Intention& i,
+  void serialize_intention(cruzdb_proto::AfterImage& i,
       SharedNodeRef node, int& field_index,
       std::vector<SharedNodeRef>& delta);
+
+  // TODO: so it can grab the root. this is only temporary for the parallel txn processing work.
+  friend class DBImpl;
 };
 
 }

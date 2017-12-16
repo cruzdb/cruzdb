@@ -341,7 +341,7 @@ TEST(DB, ReOpen) {
     ret = cruzdb::DB::Open(log, true, &db);
     ASSERT_EQ(0, ret);
 
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 150; i++) {
       std::stringstream ss;
       ss << "key-" << i;
       std::string key = ss.str();
@@ -382,7 +382,63 @@ TEST(DB, ReOpen) {
     it->Next();
   }
 
-  ASSERT_EQ(prev_db, curr_db);
+  ASSERT_EQ(curr_db, prev_db);
+
+  delete db;
+  delete log;
+}
+
+TEST(Txn, WriteWriteConflict) {
+  TempDir tdir;
+
+  zlog::Log *log;
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
+  ASSERT_EQ(ret, 0);
+
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db);
+  ASSERT_EQ(ret, 0);
+
+  auto txn0 = db->BeginTransaction();
+  txn0->Put("foo", "foo");
+  txn0->Commit();
+
+  auto txn1 = db->BeginTransaction();
+  auto txn2 = db->BeginTransaction();
+
+  txn1->Put("bar", "bar");
+  txn2->Put("bar", "baz");
+
+  ASSERT_TRUE(txn1->Commit());
+  ASSERT_FALSE(txn2->Commit());
+
+  delete db;
+  delete log;
+}
+
+TEST(Txn, WriteWriteNoConflict) {
+  TempDir tdir;
+
+  zlog::Log *log;
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
+  ASSERT_EQ(ret, 0);
+
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db);
+  ASSERT_EQ(ret, 0);
+
+  auto txn0 = db->BeginTransaction();
+  txn0->Put("foo", "foo");
+  txn0->Commit();
+
+  auto txn1 = db->BeginTransaction();
+  auto txn2 = db->BeginTransaction();
+
+  txn1->Put("bar", "bar");
+  txn2->Put("baz", "baz");
+
+  ASSERT_TRUE(txn1->Commit());
+  ASSERT_TRUE(txn2->Commit());
 
   delete db;
   delete log;

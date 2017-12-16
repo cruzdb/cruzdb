@@ -43,6 +43,7 @@ class NodePtr {
     csn_ = other.csn_;
     read_only_ = true;
     db_ = other.db_;
+    csn_is_intention_pos_ = other.csn_is_intention_pos_;
   }
 
   NodePtr& operator=(const NodePtr& other) {
@@ -51,6 +52,7 @@ class NodePtr {
     offset_ = other.offset_;
     csn_ = other.csn_;
     db_ = other.db_;
+    csn_is_intention_pos_ = other.csn_is_intention_pos_;
     return *this;
   }
 
@@ -59,7 +61,8 @@ class NodePtr {
   NodePtr& operator=(NodePtr&& other) & = delete;
 
   NodePtr(SharedNodeRef ref, DBImpl *db, bool read_only) :
-    ref_(ref), csn_(-1), offset_(-1), db_(db), read_only_(read_only)
+    ref_(ref), csn_(-33), offset_(-44), db_(db), read_only_(read_only),
+    csn_is_intention_pos_(false)
   {}
 
   void replace(const NodePtr& other) {
@@ -68,6 +71,7 @@ class NodePtr {
     csn_ = other.csn_;
     read_only_ = true;
     db_ = other.db_;
+    csn_is_intention_pos_ = other.csn_is_intention_pos_;
   }
 
   inline bool read_only() const {
@@ -82,13 +86,40 @@ class NodePtr {
   inline SharedNodeRef ref(std::vector<std::pair<int64_t, int>>& trace) {
     trace.emplace_back(csn_, offset_);
     while (true) {
+      // TODO: ugh... not thread safe with cache
       if (auto ret = ref_.lock()) {
         return ret;
       } else {
-        ref_ = fetch(trace);
+        // TODO: this is a check that we've added to catch errors in the
+        // development of parallel txn processing. we need to be able to
+        // interact with nodeptrs that aren't yet in the cache nor do they have
+        // a physical address. so for these we use external control to keep the
+        // nodes in memory that aren't physically resolvable so we should never
+        // hit this case for those nodes.
+        //std::cout << "csn " << csn_ << " off " << offset_ << std::endl;
+        assert(csn_ >= 0);
+        assert(offset_ >= 0);
+
+        // when a new root is installed right after replaying an intention and
+        // producing the in-memory after image, that after image might be GCd
+        // following serialization etc... currently we don't touch any of the
+        // pointers, and instead do a looksy into the volatile node index
+        // here... there are several options. we could also keep nodes alive
+        // longer... or fix them up before freeing them. doing this here makes a
+        // lot of sense because its a fast index lookup, and in practice the
+        // recently released nodes have a top spot in the LRU cache so are
+        // unlikely to be freed anyway...
+        uint64_t use_pos = csn_;
+        if (csn_is_intention_pos_) {
+          use_pos = resolve_intention_to_csn(csn_);
+          //std::cout << csn_ << " " << use_pos << std::endl;
+        }
+        ref_ = fetch(use_pos, trace);
       }
     }
   }
+
+  uint64_t resolve_intention_to_csn(uint64_t intention);
 
   // deference a node without providing a trace. this is used by the db that
   // doesn't maintain a trace. ideally we want to always (or nearly always)
@@ -120,6 +151,21 @@ class NodePtr {
   inline void set_csn(int64_t csn) {
     assert(!read_only());
     csn_ = csn;
+    csn_is_intention_pos_ = false;
+  }
+
+  void set_csn_is_intention_pos() {
+    csn_is_intention_pos_ = true;
+  }
+
+  // TODO: propogate through constructors and such above...
+  bool csn_is_intention_pos() {
+    return csn_is_intention_pos_;
+  }
+
+  void Print() {
+    std::cout << "NodePtr: " << "csn " << csn_ << " offset " 
+      << offset_ << " csn_is_intent " << csn_is_intention_pos_ << std::endl;
   }
 
  private:
@@ -128,11 +174,14 @@ class NodePtr {
   int64_t csn_;
   int offset_;
 
+
   DBImpl *db_;
 
   bool read_only_;
 
-  SharedNodeRef fetch(std::vector<std::pair<int64_t, int>>& trace);
+  bool csn_is_intention_pos_;
+
+  SharedNodeRef fetch(uint64_t pos, std::vector<std::pair<int64_t, int>>& trace);
 };
 
 /*
@@ -153,11 +202,14 @@ class Node {
 
   static SharedNodeRef& Nil() {
     static SharedNodeRef node = std::make_shared<Node>("", "",
-        false, nullptr, nullptr, (uint64_t)-1, true, nullptr);
+        false, nullptr, nullptr, (uint64_t)-22, true, nullptr);
     return node;
   }
 
-  static SharedNodeRef Copy(SharedNodeRef src, DBImpl *db, uint64_t rid) {
+  static uint64_t resolve_intention_to_csn(DBImpl *db, uint64_t intention);
+
+  static SharedNodeRef Copy(SharedNodeRef src, DBImpl *db, uint64_t rid,
+      int64_t max_intention_resolvable) {
     if (src == Nil())
       return Nil();
 
@@ -166,10 +218,40 @@ class Node {
     auto node = std::make_shared<Node>(src->key(), src->val(), src->red(),
         src->left.ref_notrace(), src->right.ref_notrace(), rid, false, db);
 
-    node->left.set_csn(src->left.csn());
+    if (src->left.csn_is_intention_pos()) {
+      assert(src->left.csn() >= 0);
+      //std::cout << "Copy:Left:Resolved: intention: "
+      //  << src->left.csn() << " max intent resolvable " <<
+      //  max_intention_resolvable << std::endl << std::flush;
+      if (src->left.csn() <= max_intention_resolvable) {
+        //std::cout << "foo" << std::endl << std::flush;
+        node->left.set_csn(resolve_intention_to_csn(db, src->left.csn()));
+      } else {
+        // keep propogating the intention pos
+        node->left.set_csn(src->left.csn());
+        node->left.set_csn_is_intention_pos();
+      }
+    } else {
+      node->left.set_csn(src->left.csn());
+    }
     node->left.set_offset(src->left.offset());
 
-    node->right.set_csn(src->right.csn());
+    if (src->right.csn_is_intention_pos()) {
+      assert(src->right.csn() >= 0);
+      //std::cout << "Copy:Right:Resolved: intention: "
+      //  << src->right.csn() << " max intent resolvable " <<
+      //  max_intention_resolvable << std::endl;
+      if (src->right.csn() <= max_intention_resolvable) {
+        //std::cout << "foo" << std::endl << std::flush;
+        node->right.set_csn(resolve_intention_to_csn(db, src->right.csn()));
+      } else {
+        // keep propogating the intention pos
+        node->right.set_csn(src->right.csn());
+        node->right.set_csn_is_intention_pos();
+      }
+    } else {
+      node->right.set_csn(src->right.csn());
+    }
     node->right.set_offset(src->right.offset());
 
     return node;

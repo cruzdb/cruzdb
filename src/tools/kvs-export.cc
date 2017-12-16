@@ -33,7 +33,7 @@ int main(int argc, char **argv)
     std::string data;
     ret = log->Read(pos, &data);
     if (ret == 0) {
-      cruzdb_proto::Intention i;
+      cruzdb_proto::AfterImage i;
       assert(i.ParseFromString(data));
       assert(i.IsInitialized());
 
