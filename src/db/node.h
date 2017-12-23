@@ -225,7 +225,14 @@ class Node {
       //  max_intention_resolvable << std::endl << std::flush;
       if (src->left.csn() <= max_intention_resolvable) {
         //std::cout << "foo" << std::endl << std::flush;
-        node->left.set_csn(resolve_intention_to_csn(db, src->left.csn()));
+        try {
+          node->left.set_csn(resolve_intention_to_csn(db, src->left.csn()));
+        } catch (const std::out_of_range& oor) {
+          std::cout << "resolve left csn " <<
+            src->left.csn() << " max intent resolv " <<
+            max_intention_resolvable << std::endl;
+          throw;
+        }
       } else {
         // keep propogating the intention pos
         node->left.set_csn(src->left.csn());
@@ -243,7 +250,14 @@ class Node {
       //  max_intention_resolvable << std::endl;
       if (src->right.csn() <= max_intention_resolvable) {
         //std::cout << "foo" << std::endl << std::flush;
-        node->right.set_csn(resolve_intention_to_csn(db, src->right.csn()));
+        try {
+          node->right.set_csn(resolve_intention_to_csn(db, src->right.csn()));
+        } catch (const std::out_of_range& oor) {
+          std::cout << "resolve right csn " <<
+            src->right.csn() << " max intent resolv " <<
+            max_intention_resolvable << std::endl;
+          throw;
+        }
       } else {
         // keep propogating the intention pos
         node->right.set_csn(src->right.csn());

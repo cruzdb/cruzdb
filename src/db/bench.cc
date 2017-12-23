@@ -7,6 +7,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include "cruzdb/db.h"
+#include "port/stack_trace.h"
 
 #if __APPLE__
 static inline uint64_t getns()
@@ -52,6 +53,8 @@ int main(int argc, char **argv)
   if (argc > 2) {
     stop_after = atoi(argv[2]);
   }
+
+  rocksdb::port::InstallStackTraceHandler();
 
   zlog::Log *log;
   int ret = zlog::Log::Create("lmdb", "log", {{"path", db_path}}, "", "", &log);
