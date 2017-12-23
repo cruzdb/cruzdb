@@ -154,13 +154,6 @@ class DBImpl : public DB {
   std::list<std::pair<uint64_t, cruzdb_proto::Intention>> pending_intentions_;
   std::condition_variable pending_intentions_cond_;
 
-  // counter to generate a unique root id for in-flight transactions.
-  // committed transactions use their position in the log as a root id, and
-  // this counter is always negative to produce non-conflicting values.
-  //
-  // TODO: does this work alright for concurrent transactions across nodes?
-  int64_t root_id_;
-
   // the set of transactions, initiated by this database instance, indexed by
   // their log position that are waiting on a commit/abort decision. note that
   // other nodes in a system may submit transactions to the log, so when
@@ -173,6 +166,7 @@ class DBImpl : public DB {
   bool reader_initialized = false;
   int64_t last_intention_processed = -1;
 
+  int64_t in_flight_txn_rid_;
   std::atomic<uint64_t> txn_token;
 
   // the set of after image roots produced by committed transactions, but which

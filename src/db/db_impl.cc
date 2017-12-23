@@ -9,7 +9,7 @@ DBImpl::DBImpl(zlog::Log *log) :
   log_(log),
   cache_(this),
   stop_(false),
-  root_id_(-10),
+  in_flight_txn_rid_(-1),
   txn_token(0),
   root_(Node::Nil(), this, true),
   root_intention_(-1),
@@ -519,10 +519,11 @@ Transaction *DBImpl::BeginTransaction()
   if (it != intention_to_after_image_pos_.rend()) {
     max_intention_resolvable = it->first;
   }
-  return new TransactionImpl(this, root_,
+  return new TransactionImpl(this,
+      root_,
       root_intention_,
-      root_id_--,
-      max_intention_resolvable);
+      max_intention_resolvable,
+      in_flight_txn_rid_--);
 }
 
 // TODO:
@@ -687,10 +688,10 @@ void DBImpl::TransactionProcessor()
 
    // std::cout << "txn-replay: intent @ " << i_info.first << std::endl;
     auto txn_wrapper = std::make_shared<PersistentTree>(this, root_,
-        root_intention_,
-        i_info.first,
-        max_intention_resolvable);
+        max_intention_resolvable,
+        (int64_t)i_info.first);
 
+    assert(txn_wrapper->rid() >= 0);
 
     lk.unlock();
 
@@ -877,7 +878,7 @@ void DBImpl::TransactionProcessor()
     // also we need to do this without hte db lock since we might try to resolve
     // some pointers in here. ideally we do not need to resolve shit. so we'll
     // need to figure that out later.
-    int root_offset = txn_wrapper->infect_self_pointers();
+    int root_offset = txn_wrapper->infect_self_pointers(i_info.first);
 
     lk.lock();
 
@@ -919,7 +920,12 @@ void DBImpl::TransactionProcessor()
 
     // TODO: this may be Nil... in which case the asserts below are wrong
     assert(txn_wrapper->root_ != Node::Nil());
-    root.set_csn(txn_wrapper->root_->rid());
+    // TODO: watch out for scenarios in which the delta is empty and we are now
+    // referencing a root node i the after image that is unchanged, yet we treat
+    // here like it is coming from a new intention. we shouldn't ever encounter
+    // this in the current implementation cause we bail on empty transactions
+    // but in general we need be careful and check for different conditions.
+    root.set_csn(i_info.first);
     root.set_csn_is_intention_pos();
     root.set_offset(root_offset); // last one in serialization order
 
@@ -1060,7 +1066,7 @@ void DBImpl::TransactionWriter()
     // internally, OR are fully defined physically.
     //
     // NOTE: here we don't alter the 
-    root->SerializeAfterImage(after_image, delta);
+    root->SerializeAfterImage(after_image, root_info.first, delta);
 
     // set during serialization, provided when the intention was processed to
     // produce this after image.

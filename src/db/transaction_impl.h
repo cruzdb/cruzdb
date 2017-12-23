@@ -12,21 +12,19 @@ class DBImpl;
 /*
  * would be nice to have some mechanism here for really enforcing the idea
  * that this transaction is isolated.
+ *
+ * TODO: combine root intention and nodeptr.
  */
 class TransactionImpl : public Transaction {
  public:
-  TransactionImpl(DBImpl *db, NodePtr root, int64_t root_intention, int64_t rid,
-      uint64_t max_intention_resolvable) :
+  TransactionImpl(DBImpl *db, NodePtr root, int64_t root_intention,
+      uint64_t max_intention_resolvable, int64_t rid) :
     db_(db),
-    tree_(db, root, root_intention, rid, max_intention_resolvable),
+    tree_(db, root, max_intention_resolvable, rid),
     committed_(false),
     aborted_(false)
   {
-    //assert(rid_ < 0); this doesn't hold any longer because we are, silly
-    //enough, using the txn as a container for the after image when we read up
-    //the intention from the log. one of the immediate next steps will be to
-    //pull out the tree logic so its useful outside the txn context. TODO.
-    //intention_.set_snapshot(src_root_.csn());
+    assert(tree_.rid() < 0);
     intention_.set_snapshot_intention(root_intention);
   }
 

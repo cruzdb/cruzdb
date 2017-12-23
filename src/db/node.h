@@ -303,8 +303,6 @@ class Node {
 
   inline void set_rid(int64_t rid) {
     assert(!read_only());
-    assert(rid_ < 0);
-    assert(rid >= 0);
     rid_ = rid;
   }
 

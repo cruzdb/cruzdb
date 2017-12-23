@@ -8,13 +8,12 @@ void PersistentTree::UpdateLRU()
   db_->UpdateLRU(trace_);
 }
 
-void PersistentTree::infect_node_ptr(NodePtr& src, int maybe_offset)
+void PersistentTree::infect_node_ptr(uint64_t intention, NodePtr& src, int maybe_offset)
 {
   if (src.ref_notrace() == Node::Nil()) {
     // nothing
   } else if (src.ref(trace_)->rid() == rid_) {
-    assert(rid_ >= 0);
-    src.set_csn(rid_);
+    src.set_csn(intention);
     src.set_csn_is_intention_pos();
     src.set_offset(maybe_offset);
     //std::cout << "infect csn/intention " << src.csn() << " off " << src.offset() << std::endl;
@@ -28,30 +27,30 @@ void PersistentTree::infect_node_ptr(NodePtr& src, int maybe_offset)
 }
 
 void PersistentTree::infect_node(SharedNodeRef node,
-    int maybe_left_offset, int maybe_right_offset)
+    uint64_t intention, int maybe_left_offset, int maybe_right_offset)
 {
-  infect_node_ptr(node->left, maybe_left_offset);
-  infect_node_ptr(node->right, maybe_right_offset);
+  infect_node_ptr(intention, node->left, maybe_left_offset);
+  infect_node_ptr(intention, node->right, maybe_right_offset);
 }
 
-void PersistentTree::infect_after_image(SharedNodeRef node, int& field_index)
+void PersistentTree::infect_after_image(SharedNodeRef node, uint64_t intention, int& field_index)
 {
   assert(node != nullptr);
 
   if (node == Node::Nil() || node->rid() != rid_)
     return;
 
-  infect_after_image(node->left.ref(trace_), field_index);
+  infect_after_image(node->left.ref(trace_), intention, field_index);
   auto maybe_left_offset = field_index - 1;
 
-  infect_after_image(node->right.ref(trace_), field_index);
+  infect_after_image(node->right.ref(trace_), intention, field_index);
   auto maybe_right_offset = field_index - 1;
 
-  infect_node(node, maybe_left_offset, maybe_right_offset);
+  infect_node(node, intention, maybe_left_offset, maybe_right_offset);
   field_index++;
 }
 
-int PersistentTree::infect_self_pointers()
+int PersistentTree::infect_self_pointers(uint64_t intention)
 {
   //assert(committed_);
 
@@ -64,7 +63,7 @@ int PersistentTree::infect_self_pointers()
   } else
     assert(root_->rid() == rid_);
 
-  infect_after_image(root_, field_index);
+  infect_after_image(root_, intention, field_index);
 
   assert(field_index > 0);
   return field_index - 1;
@@ -155,6 +154,7 @@ void PersistentTree::serialize_intention(cruzdb_proto::AfterImage& i,
 }
 
 void PersistentTree::SerializeAfterImage(cruzdb_proto::AfterImage& i,
+    uint64_t intention,
     std::vector<SharedNodeRef>& delta)
 {
   //assert(committed_);
@@ -174,7 +174,7 @@ void PersistentTree::SerializeAfterImage(cruzdb_proto::AfterImage& i,
 
   // only valid when the transaction is being used to produce after images when
   // processing intentions from the log.
-  i.set_intention(rid_);
+  i.set_intention(intention);
 }
 
 void PersistentTree::SetDeltaPosition(std::vector<SharedNodeRef>& delta,

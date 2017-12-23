@@ -242,12 +242,8 @@ SharedNodeRef NodeCache::deserialize_node(const cruzdb_proto::AfterImage& i,
 {
   const cruzdb_proto::Node& n = i.tree(index);
 
-  // TODO: replace rid==csn with a lookup table that lets us
-  // use random values for more reliable assertions.
-  //
-  // TODO: initialize so it can be read-only after creation
   auto nn = std::make_shared<Node>(n.key(), n.val(), n.red(),
-      nullptr, nullptr, pos, false, db_);
+      nullptr, nullptr, i.intention(), false, db_);
 
   // the left and right pointers are undefined. make sure to handle the case
   // correctly in which a child is nil vs defined on storage but not resolved
