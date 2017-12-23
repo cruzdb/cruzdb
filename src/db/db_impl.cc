@@ -686,7 +686,7 @@ void DBImpl::TransactionProcessor()
    // then, there is no need to actually do commit/abort processing.
 
    // std::cout << "txn-replay: intent @ " << i_info.first << std::endl;
-    auto txn_wrapper = std::make_shared<TransactionImpl>(this, root_,
+    auto txn_wrapper = std::make_shared<PersistentTree>(this, root_,
         root_intention_,
         i_info.first,
         max_intention_resolvable);
@@ -848,10 +848,6 @@ void DBImpl::TransactionProcessor()
           exit(1);
       }
     }
-
-    // mark committed. i mean, sure... why not? one reason is because it doesn't
-    // commit... all in good time...
-    txn_wrapper->MarkCommitted();
 
     if (idx == 0) {
       //std::cout << "warning: empty transaction" << std::endl;

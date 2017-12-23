@@ -8,6 +8,7 @@ add_library(cruzdb SHARED
   node_cache.cc
   iterator_impl.cc
   node.cc
+  persistent_tree.cc
   ${PROTO_SRCS})
 target_include_directories(cruzdb
   PUBLIC ${PROTOBUF_INCLUDE_DIR})
