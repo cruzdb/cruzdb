@@ -84,19 +84,12 @@ class DBImpl : public DB {
   bool CompleteTransaction(TransactionImpl *txn);
   void AbortTransaction(TransactionImpl *txn);
 
-  uint64_t resolve_intention_to_csn(uint64_t intention) {
-    std::unique_lock<std::mutex> lk(lock_);
-    assert(!intention_to_after_image_pos_.empty());
-    return intention_to_after_image_pos_.at(intention);
-  }
-
-  uint64_t resolve_intention_to_csn_locked(uint64_t intention) {
-    assert(!intention_to_after_image_pos_.empty());
-    return intention_to_after_image_pos_.at(intention);
-  }
-
   void start_reader() {
     log_reader_ = std::thread(&DBImpl::LogReader, this);
+  }
+
+  uint64_t IntentionToAfterImage(uint64_t intention_pos) {
+    return cache_.IntentionToAfterImage(intention_pos);
   }
 
  private:
@@ -113,12 +106,12 @@ class DBImpl : public DB {
     std::condition_variable cond;
   };
 
-  SharedNodeRef fetch(std::vector<std::pair<int64_t, int>>& trace,
-      int64_t csn, int offset) {
-    return cache_.fetch(trace, csn, offset);
+  SharedNodeRef fetch(std::vector<NodeAddress>& trace,
+      boost::optional<NodeAddress>& address) {
+    return cache_.fetch(trace, address);
   }
 
-  void UpdateLRU(std::vector<std::pair<int64_t, int>>& trace) {
+  void UpdateLRU(std::vector<NodeAddress>& trace) {
     cache_.UpdateLRU(trace);
   }
 
@@ -193,8 +186,6 @@ class DBImpl : public DB {
 
   std::list<std::pair<uint64_t, cruzdb_proto::AfterImage>> pending_after_images_;
   std::condition_variable pending_after_images_cond_;
-
-  std::map<uint64_t, uint64_t> intention_to_after_image_pos_;
 
   // after image tree for last committed transaction. this may be a node that
   // has a fully specified phsyical address in which case if it has a node

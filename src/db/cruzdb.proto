@@ -4,6 +4,7 @@ package cruzdb_proto;
 
 option optimize_for = SPEED;
 
+// TODO: updating names (eg csn)
 message NodePtr {
     required bool nil = 1;
     required bool self = 2;
@@ -33,9 +34,8 @@ message Node {
 // cases is due to the restructing of the txn processing strategy and we'll need
 // to refactor a lot of this.
 message AfterImage {
-    required int64 snapshot = 1;
-    required int64 intention = 2;
-    repeated Node tree = 3;
+    required int64 intention = 1;
+    repeated Node tree = 2;
 }
 
 message TransactionOp {

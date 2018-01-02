@@ -8,21 +8,19 @@ void PersistentTree::UpdateLRU()
   db_->UpdateLRU(trace_);
 }
 
+
+// when a node is copied, its left and right pointers are also copied. after
+// having copied a node, if one of the child pointers turns out to point to a
+// another new node in the delta, then the physical address needs to be updated
+// to point to self. that means that the node can temporarily be in a weird
+// state. it would be good to work on eliminating that special state. this whole
+// thing started because in SetIntentionAddress i asserted that no address would
+// exist since its pointing at a new node, but that isn't always the case.
 void PersistentTree::infect_node_ptr(uint64_t intention, NodePtr& src, int maybe_offset)
 {
-  if (src.ref_notrace() == Node::Nil()) {
-    // nothing
-  } else if (src.ref(trace_)->rid() == rid_) {
-    src.set_csn(intention);
-    src.set_csn_is_intention_pos();
-    src.set_offset(maybe_offset);
-    //std::cout << "infect csn/intention " << src.csn() << " off " << src.offset() << std::endl;
-  } else {
-    if (src.csn() < 0 || src.offset() < 0) {
-      //std::cout << "csn " << src.csn() << " off " << src.offset() << std::endl;
-      assert(src.csn() >= 0);
-      assert(src.offset() >= 0);
-    }
+  if (src.ref_notrace() != Node::Nil() &&
+      src.ref(trace_)->rid() == rid_) {
+    src.SetIntentionAddress(intention, maybe_offset);
   }
 }
 
@@ -78,41 +76,30 @@ void PersistentTree::serialize_node_ptr(cruzdb_proto::NodePtr *dst,
     dst->set_csn(0);
     dst->set_off(0);
   } else if (src.ref(trace_)->rid() == rid_) {
-    // if the pointer is into the current after image, that's ok. we can't have
-    // a csn/log location yet...
     dst->set_nil(false);
     dst->set_self(true);
     dst->set_csn(0);
     dst->set_off(maybe_offset);
-    // FIXME: this should be set by infection. so, we should at least assert
-    // this assumptino.
-    src.set_offset(maybe_offset); // move up a level
+    // assert the offset was set correctly during infection.
+    assert(src.Address());
+    assert(src.Address()->Offset() == maybe_offset);
   } else {
+    auto address = src.Address();
+    assert(address);
+
     assert(src.ref(trace_) != nullptr);
     dst->set_nil(false);
     dst->set_self(false);
-    // here there are two cases... either the pointer is well defined
-    // physically, or we can obtain it from the volatile pointer index to make
-    // it well defined physically...
-    //
-    // TODO: we need to make sure the serialization contains the correct
-    // physical locations for pointers. but we don't need to update the source
-    // node here... it makes more sense to serialize a copy, and then when we
-    // fold into the cache, make that a well defined point in the exection where
-    // we are handling update races...
-    //
-    // perhaps when we get ready to fold into the cahce, we just make new copies
-    // of nodes?
-    //std::cout << "XXX " << src.csn() << std::endl;
-    if (src.csn_is_intention_pos()) {
-      auto csn = db_->resolve_intention_to_csn(src.csn());
-      dst->set_csn(csn);
-      //std::cout << csn << std::endl;
-      //src.set_csn(csn); // clears intention flag
-    } else {
-      dst->set_csn(src.csn());
+
+    // it might make more sense to move this serialization work into the node
+    // cache, which is where the intention mapping lives anyway.
+    uint64_t position = address->Position();
+    if (!address->IsAfterImage()) {
+      position = db_->IntentionToAfterImage(position);
     }
-    dst->set_off(src.offset());
+
+    dst->set_csn(position);
+    dst->set_off(address->Offset());
   }
 }
 
@@ -168,10 +155,6 @@ void PersistentTree::SerializeAfterImage(cruzdb_proto::AfterImage& i,
 
   serialize_intention(i, root_, field_index, delta);
 
-  // TODO: is this subject to the must-be-defined restriciton. seems like it...
-  // but i also think we do not even use this, so maybe we can nuke it?
-  i.set_snapshot(src_root_.csn());
-
   // only valid when the transaction is being used to produce after images when
   // processing intentions from the log.
   i.set_intention(intention);
@@ -182,34 +165,12 @@ void PersistentTree::SetDeltaPosition(std::vector<SharedNodeRef>& delta,
 {
   for (const auto nn : delta) {
     if (nn->left.ref_notrace()->rid() == rid_) {
-      nn->left.set_csn(pos);
-    } else if (nn->left.ref_notrace() != Node::Nil()) {
-      if (nn->left.csn_is_intention_pos()) {
-        auto csn = db_->resolve_intention_to_csn_locked(nn->left.csn());
-        nn->left.set_csn(csn);
-      }
+      nn->left.ConvertToAfterImage(pos);
     }
     if (nn->right.ref_notrace()->rid() == rid_) {
-      nn->right.set_csn(pos);
-    } else if (nn->right.ref_notrace() != Node::Nil()) {
-      if (nn->right.csn_is_intention_pos()) {
-        auto csn = db_->resolve_intention_to_csn_locked(nn->right.csn());
-        nn->right.set_csn(csn);
-      }
+      nn->right.ConvertToAfterImage(pos);
     }
   }
-
-  // i believe this had been used because the transaction was initially created
-  // wiht a negative rid, but once it was made durable, the nodes in memory were
-  // reused, and the rid is updated to reflect this. we don't use this any more,
-  // in the sense that we aren't now serializing transactions that are not
-  // comitting.
-#if 0
-  // set the rid of these nodes to the log position where they are stored.
-  for (auto nn : delta) {
-    nn->set_rid(pos);
-  }
-#endif
 }
 
 

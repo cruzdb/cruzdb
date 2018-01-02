@@ -41,13 +41,12 @@ class PersistentTree {
  public:
   PersistentTree(DBImpl *db,
       NodePtr root,
-      uint64_t max_intention_resolvable,
       int64_t rid) :
     db_(db),
     src_root_(root),
     root_(nullptr),
     rid_(rid),
-    max_intention_resolvable_(max_intention_resolvable)
+    max_intention_resolvable_(-1) // TODO: remove
   {}
 
  public:
@@ -157,7 +156,7 @@ class PersistentTree {
   // access trace used to update lru cache. the trace is applied and reset
   // after each operation (e.g. get/put/etc) or if the transaction accesses
   // the cache to resolve a pointer (e.g. accessing the log).
-  std::vector<std::pair<int64_t, int>> trace_;
+  std::vector<NodeAddress> trace_;
   void UpdateLRU();
 
   // keep new nodes alive for the duration of the transaction until we

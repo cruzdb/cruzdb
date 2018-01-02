@@ -11,7 +11,7 @@ DBImpl::DBImpl(zlog::Log *log) :
   stop_(false),
   in_flight_txn_rid_(-1),
   txn_token(0),
-  root_(Node::Nil(), this, true),
+  root_(Node::Nil(), this),
   root_intention_(-1),
   txn_writer_(std::thread(&DBImpl::TransactionWriter, this)),
   txn_processor_(std::thread(&DBImpl::TransactionProcessor, this)),
@@ -266,6 +266,7 @@ int DBImpl::RestoreFromLog()
 std::ostream& operator<<(std::ostream& out, const SharedNodeRef& n)
 {
   out << "node(" << n.get() << "):" << n->key().ToString() << ": ";
+#if 0 // TODO: fixup for new addressing
   out << (n->red() ? "red " : "blk ");
   //out << "fi " << n->field_index() << " ";
   out << "left=[p" << n->left.csn() << ",o" << n->left.offset() << ",";
@@ -280,6 +281,7 @@ std::ostream& operator<<(std::ostream& out, const SharedNodeRef& n)
   else
     out << n->right.ref_notrace().get();
   out << "] ";
+#endif
   return out;
 }
 
@@ -322,8 +324,10 @@ void DBImpl::write_dot_node(std::ostream& out,
 {
   out << "\"" << parent.get() << "\":" << dir << " -> ";
   out << "\"" << child.ref_notrace().get() << "\"";
+#if 0 // TODO: fixup for new addressing
   out << " [label=\"" << child.csn() << ":"
     << child.offset() << "\"];" << std::endl;
+#endif
 }
 
 void DBImpl::write_dot_recursive(std::ostream& out, int64_t rid,
@@ -384,7 +388,9 @@ void DBImpl::write_dot_history(std::ostream& out,
 
     // build sub-graph label
     std::stringstream label;
+#if 0 // TODO: fixup for new addressing
     label << "label = \"root: " << (*it)->root.csn();
+#endif
     label << "\"";
 
     out << "subgraph cluster_" << trees++ << " {" << std::endl;
@@ -481,7 +487,7 @@ void DBImpl::validate_rb_tree(NodePtr root)
 int DBImpl::Get(const zlog::Slice& key, std::string *value)
 {
   auto root = root_;
-  std::vector<std::pair<int64_t, int>> trace;
+  std::vector<NodeAddress> trace;
 
   auto cur = root.ref(trace);
   while (cur != Node::Nil()) {
@@ -514,15 +520,9 @@ int DBImpl::Get(const zlog::Slice& key, std::string *value)
 Transaction *DBImpl::BeginTransaction()
 {
   std::unique_lock<std::mutex> lk(lock_);
-  int64_t max_intention_resolvable = -1;
-  auto it = intention_to_after_image_pos_.rbegin();
-  if (it != intention_to_after_image_pos_.rend()) {
-    max_intention_resolvable = it->first;
-  }
   return new TransactionImpl(this,
       root_,
       root_intention_,
-      max_intention_resolvable,
       in_flight_txn_rid_--);
 }
 
@@ -655,6 +655,7 @@ void DBImpl::TransactionProcessor()
     // pointers later... it's like a virus that will affect future transactions.
     //
     // max intent resovl: this is for stopping propogation of volatile pointers
+#if 0
     uint64_t max_intention_resolvable = -1;
     {
       auto it = intention_to_after_image_pos_.rbegin();
@@ -662,6 +663,7 @@ void DBImpl::TransactionProcessor()
         max_intention_resolvable = it->first;
       }
     }
+#endif
 
 #if 0
     is there any risk here of having max intent pointing at the same intent that
@@ -687,9 +689,7 @@ void DBImpl::TransactionProcessor()
    // then, there is no need to actually do commit/abort processing.
 
    // std::cout << "txn-replay: intent @ " << i_info.first << std::endl;
-    auto txn_wrapper = std::make_shared<PersistentTree>(this, root_,
-        max_intention_resolvable,
-        (int64_t)i_info.first);
+    auto txn_wrapper = std::make_shared<PersistentTree>(this, root_, (int64_t)i_info.first);
 
     assert(txn_wrapper->rid() >= 0);
 
@@ -916,7 +916,7 @@ void DBImpl::TransactionProcessor()
     // TODO: filling in csn during after image replay races with whatever the
     // current root is which copies of nodes are being made during intention
     // replay.
-    NodePtr root(txn_wrapper->root_, this, false);
+    NodePtr root(txn_wrapper->root_, this);
 
     // TODO: this may be Nil... in which case the asserts below are wrong
     assert(txn_wrapper->root_ != Node::Nil());
@@ -925,12 +925,8 @@ void DBImpl::TransactionProcessor()
     // here like it is coming from a new intention. we shouldn't ever encounter
     // this in the current implementation cause we bail on empty transactions
     // but in general we need be careful and check for different conditions.
-    root.set_csn(i_info.first);
-    root.set_csn_is_intention_pos();
-    root.set_offset(root_offset); // last one in serialization order
-
-    // this is the address of the intntion that produced this db state
-    root_intention_ = root.csn();
+    root.SetIntentionAddress(i_info.first, root_offset);
+    root_intention_ = i_info.first;
 
     root_.replace(root);
 
@@ -1066,6 +1062,9 @@ void DBImpl::TransactionWriter()
     // internally, OR are fully defined physically.
     //
     // NOTE: here we don't alter the 
+    //
+    // After the serialization I/O complets we can then update the node pointers
+    // and probably also trim the index..
     root->SerializeAfterImage(after_image, root_info.first, delta);
 
     // set during serialization, provided when the intention was processed to
@@ -1145,15 +1144,24 @@ void DBImpl::TransactionWriter()
       // their physical log location. TODO: use some sort of threshold for
       // expiring entries out of this index. TODO: how does node copy know that
       // the info can be found in this idnex?
+
       assert(intention_pos < it->second.first);
-      //std::cout << "intention index insert " << intention_pos << " " << it->second.first << std::endl
-      //  << std::flush;
-      auto r = intention_to_after_image_pos_.emplace(intention_pos, it->second.first);
-      assert(r.second);
+      //auto r = intention_to_after_image_pos_.emplace(intention_pos, it->second.first);
+      //assert(r.second);
 
       // TODO: so... this is a contention point. there are readers of the state
       // we are now changing... this will need to be a big part of the refactor.
+      //
+      // TODO: setting the delta position only updates new self pointer in new
+      // nodes. it might be a new node contains a pointer that was copied which
+      // points into the volatile space. so, this needs to be taken into account
+      // when determing when to trim the index.
       root->SetDeltaPosition(delta, it->second.first);
+      cache_.SetIntentionMapping(intention_pos, it->second.first);
+
+      // TODO: we could also add some assertions here that all pointers in the
+      // delta being added to the cache have been converted to after image
+      // pointers. that should be the case...
       cache_.ApplyAfterImageDelta(delta, it->second.first);
 
       break;
@@ -1176,6 +1184,11 @@ void DBImpl::AbortTransaction(TransactionImpl *txn)
   //assert(!txn->Completed());
 }
 
+/**
+ * TODO: when we get around to allowing the transaction after image to be
+ * re-used to avoid de-serialization from the log, then we need to make sure we
+ * properly convert the in-memory representation (e.g. updating rid).
+ */
 bool DBImpl::CompleteTransaction(TransactionImpl *txn)
 {
   // TODO: are these flags really necessary?

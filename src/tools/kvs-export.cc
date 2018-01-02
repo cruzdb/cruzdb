@@ -45,8 +45,10 @@ int main(int argc, char **argv)
       writer.Uint(pos);
       writer.Key("bytes");
       writer.Uint(data.size());
+#if 0 // FIXME: not valid anymore
       writer.Key("snapshot");
       writer.Uint(i.snapshot());
+#endif
       writer.Key("tree");
       writer.StartArray();
 

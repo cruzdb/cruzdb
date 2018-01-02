@@ -3,7 +3,9 @@
 #include <memory>
 #include <string>
 #include <iostream>
+#include <mutex>
 #include <vector>
+#include <boost/optional.hpp>
 #include <zlog/slice.h>
 
 namespace cruzdb {
@@ -33,26 +35,47 @@ class DBImpl;
  *
  * Copy assertion should check if we are copying a null pointer that the
  * physical address is defined.
+ *
+ * TODO: add locking to various constructors
+ * TODO: formalize rel between Nil and address = boost::none
  */
+
+class NodeAddress {
+ public:
+  NodeAddress(uint64_t position, uint16_t offset, bool is_afterimage) :
+    position_(position), offset_(offset), is_afterimage_(is_afterimage)
+  {}
+
+  uint64_t Position() const {
+    return position_;
+  }
+
+  uint16_t Offset() const {
+    return offset_;
+  }
+
+  bool IsAfterImage() const {
+    return is_afterimage_;
+  }
+
+ private:
+  uint64_t position_;
+  uint16_t offset_;
+  bool is_afterimage_;
+};
+
 class NodePtr {
  public:
-
   NodePtr(const NodePtr& other) {
     ref_ = other.ref_;
-    offset_ = other.offset_;
-    csn_ = other.csn_;
-    read_only_ = true;
     db_ = other.db_;
-    csn_is_intention_pos_ = other.csn_is_intention_pos_;
+    address_ = other.address_;
   }
 
   NodePtr& operator=(const NodePtr& other) {
-    assert(!read_only());
     ref_ = other.ref_;
-    offset_ = other.offset_;
-    csn_ = other.csn_;
     db_ = other.db_;
-    csn_is_intention_pos_ = other.csn_is_intention_pos_;
+    address_ = other.address_;
     return *this;
   }
 
@@ -60,128 +83,97 @@ class NodePtr {
   //NodePtr(NodePtr&& other) = delete;
   NodePtr& operator=(NodePtr&& other) & = delete;
 
-  NodePtr(SharedNodeRef ref, DBImpl *db, bool read_only) :
-    ref_(ref), csn_(-33), offset_(-44), db_(db), read_only_(read_only),
-    csn_is_intention_pos_(false)
+  // TODO: remove read_only
+  NodePtr(SharedNodeRef ref, DBImpl *db) :
+    ref_(ref),
+    address_(boost::none),
+    db_(db)
   {}
 
   void replace(const NodePtr& other) {
     ref_ = other.ref_;
-    offset_ = other.offset_;
-    csn_ = other.csn_;
-    read_only_ = true;
     db_ = other.db_;
-    csn_is_intention_pos_ = other.csn_is_intention_pos_;
+    address_ = other.address_;
   }
 
-  inline bool read_only() const {
-    return read_only_;
-  }
-
-  inline void set_read_only() {
-    assert(!read_only());
-    read_only_ = true;
-  }
-
-  inline SharedNodeRef ref(std::vector<std::pair<int64_t, int>>& trace) {
-    trace.emplace_back(csn_, offset_);
+  // TODO: tracing
+  inline SharedNodeRef ref(std::vector<NodeAddress>& trace) {
+    std::unique_lock<std::mutex> lk(lock_);
+    if (address_) {
+      trace.emplace_back(*address_);
+    }
     while (true) {
-      // TODO: ugh... not thread safe with cache
       if (auto ret = ref_.lock()) {
         return ret;
       } else {
-        // TODO: this is a check that we've added to catch errors in the
-        // development of parallel txn processing. we need to be able to
-        // interact with nodeptrs that aren't yet in the cache nor do they have
-        // a physical address. so for these we use external control to keep the
-        // nodes in memory that aren't physically resolvable so we should never
-        // hit this case for those nodes.
-        //std::cout << "csn " << csn_ << " off " << offset_ << std::endl;
-        assert(csn_ >= 0);
-        assert(offset_ >= 0);
-
-        // when a new root is installed right after replaying an intention and
-        // producing the in-memory after image, that after image might be GCd
-        // following serialization etc... currently we don't touch any of the
-        // pointers, and instead do a looksy into the volatile node index
-        // here... there are several options. we could also keep nodes alive
-        // longer... or fix them up before freeing them. doing this here makes a
-        // lot of sense because its a fast index lookup, and in practice the
-        // recently released nodes have a top spot in the LRU cache so are
-        // unlikely to be freed anyway...
-        uint64_t use_pos = csn_;
-        if (csn_is_intention_pos_) {
-          use_pos = resolve_intention_to_csn(csn_);
-          //std::cout << csn_ << " " << use_pos << std::endl;
+        assert(address_);
+        auto address = address_;
+        lk.unlock();
+        auto node = fetch(address, trace);
+        lk.lock();
+        if (auto ret = ref_.lock()) {
+          return ret;
+        } else {
+          ref_ = node;
         }
-        ref_ = fetch(use_pos, trace);
       }
     }
   }
-
-  uint64_t resolve_intention_to_csn(uint64_t intention);
 
   // deference a node without providing a trace. this is used by the db that
   // doesn't maintain a trace. ideally we want to always (or nearly always)
   // have a trace. this is only for convenience in some routines that do
   // things like print the tree.
   inline SharedNodeRef ref_notrace() {
-    std::vector<std::pair<int64_t, int>> trace;
+    std::vector<NodeAddress> trace;
     return ref(trace);
   }
 
   inline void set_ref(SharedNodeRef ref) {
-    assert(!read_only());
+    std::lock_guard<std::mutex> l(lock_);
     ref_ = ref;
   }
 
-  inline int offset() const {
-    return offset_;
+  boost::optional<NodeAddress> Address() const {
+    std::lock_guard<std::mutex> l(lock_);
+    return address_;
   }
 
-  inline void set_offset(int offset) {
-    assert(!read_only());
-    offset_ = offset;
+  void SetAddress(boost::optional<NodeAddress> address) {
+    std::lock_guard<std::mutex> l(lock_);
+    assert(!address_);
+    address_ = address;
   }
 
-  inline int64_t csn() const {
-    return csn_;
+  void SetIntentionAddress(uint64_t position, uint16_t offset) {
+    std::lock_guard<std::mutex> l(lock_);
+    address_.emplace(position, offset, false);
   }
 
-  inline void set_csn(int64_t csn) {
-    assert(!read_only());
-    csn_ = csn;
-    csn_is_intention_pos_ = false;
+  void SetAfterImageAddress(uint64_t position, uint16_t offset) {
+    std::lock_guard<std::mutex> l(lock_);
+    assert(!address_);
+    address_.emplace(position, offset, true);
   }
 
-  void set_csn_is_intention_pos() {
-    csn_is_intention_pos_ = true;
-  }
-
-  // TODO: propogate through constructors and such above...
-  bool csn_is_intention_pos() {
-    return csn_is_intention_pos_;
-  }
-
-  void Print() {
-    std::cout << "NodePtr: " << "csn " << csn_ << " offset " 
-      << offset_ << " csn_is_intent " << csn_is_intention_pos_ << std::endl;
+  void ConvertToAfterImage(uint64_t position) {
+    std::lock_guard<std::mutex> l(lock_);
+    assert(address_);
+    assert(!address_->IsAfterImage());
+    assert(address_->Position() < position);
+    address_.emplace(position, address_->Offset(), true);
   }
 
  private:
-  // heap pointer (optional), and log address
-  WeakNodeRef ref_;
-  int64_t csn_;
-  int offset_;
+  mutable std::mutex lock_;
 
+  WeakNodeRef ref_;
+  boost::optional<NodeAddress> address_;
 
   DBImpl *db_;
 
-  bool read_only_;
-
-  bool csn_is_intention_pos_;
-
-  SharedNodeRef fetch(uint64_t pos, std::vector<std::pair<int64_t, int>>& trace);
+  SharedNodeRef fetch(boost::optional<NodeAddress>& address,
+      std::vector<NodeAddress>& trace);
 };
 
 /*
@@ -195,18 +187,18 @@ class Node {
   // TODO: allow rid to have negative initialization value
   Node(const zlog::Slice& key, const zlog::Slice& val, bool red, SharedNodeRef lr, SharedNodeRef rr,
       uint64_t rid, bool read_only, DBImpl *db) :
-    left(lr, db, read_only), right(rr, db, read_only),
+    left(lr, db), right(rr, db),
     key_(key.data(), key.size()), val_(val.data(), val.size()),
     red_(red), rid_(rid), read_only_(read_only)
   {}
 
   static SharedNodeRef& Nil() {
+    // TODO: in a redesign, it would be nice to get rid of Nil being represented
+    // like this, especially the weird min rid value.
     static SharedNodeRef node = std::make_shared<Node>("", "",
-        false, nullptr, nullptr, (uint64_t)-22, true, nullptr);
+        false, nullptr, nullptr, std::numeric_limits<int64_t>::min(), true, nullptr);
     return node;
   }
-
-  static uint64_t resolve_intention_to_csn(DBImpl *db, uint64_t intention);
 
   static SharedNodeRef Copy(SharedNodeRef src, DBImpl *db, uint64_t rid,
       int64_t max_intention_resolvable) {
@@ -218,6 +210,11 @@ class Node {
     auto node = std::make_shared<Node>(src->key(), src->val(), src->red(),
         src->left.ref_notrace(), src->right.ref_notrace(), rid, false, db);
 
+    // TODO: move this into the constructor
+    node->left.SetAddress(src->left.Address());
+    node->right.SetAddress(src->right.Address());
+
+#if 0
     if (src->left.csn_is_intention_pos()) {
       assert(src->left.csn() >= 0);
       //std::cout << "Copy:Left:Resolved: intention: "
@@ -267,6 +264,7 @@ class Node {
       node->right.set_csn(src->right.csn());
     }
     node->right.set_offset(src->right.offset());
+#endif
 
     return node;
   }
@@ -277,8 +275,6 @@ class Node {
 
   inline void set_read_only() {
     assert(!read_only());
-    left.set_read_only();
-    right.set_read_only();
     read_only_ = true;
   }
 

@@ -49,10 +49,22 @@ class NodeCache {
   NodePtr CacheAfterImage(const cruzdb_proto::AfterImage& i,
       uint64_t pos);
   NodePtr ApplyAfterImageDelta(const std::vector<SharedNodeRef>& delta,
-      uint64_t pos);
+      uint64_t after_image_pos);
 
-  SharedNodeRef fetch(std::vector<std::pair<int64_t, int>>& trace,
-      int64_t csn, int offset);
+  SharedNodeRef fetch(std::vector<NodeAddress>& trace,
+      boost::optional<NodeAddress>& address);
+
+  uint64_t IntentionToAfterImage(uint64_t intention_pos) {
+    std::lock_guard<std::mutex> l(lock_);
+    assert(!intention_map_.empty());
+    return intention_map_.at(intention_pos);
+  }
+
+  void SetIntentionMapping(uint64_t intention_pos,
+      uint64_t after_image_pos) {
+    std::lock_guard<std::mutex> l(lock_);
+    intention_map_.emplace(intention_pos, after_image_pos);
+  }
 
   void Stop() {
     lock_.lock();
@@ -62,7 +74,7 @@ class NodeCache {
     vaccum_.join();
   }
 
-  void UpdateLRU(std::vector<std::pair<int64_t, int>>& trace) {
+  void UpdateLRU(std::vector<NodeAddress>& trace) {
     if (!trace.empty()) {
       std::lock_guard<std::mutex> l(lock_);
       traces_.emplace_front();
@@ -95,9 +107,9 @@ class NodeCache {
     return used_bytes_;
   }
 
-  std::list<std::vector<std::pair<int64_t, int>>> traces_;
+  std::list<std::vector<NodeAddress>> traces_;
 
-  //void ResolveNodePtr(NodePtr& ptr);
+  std::unordered_map<uint64_t, uint64_t> intention_map_;
 
   SharedNodeRef deserialize_node(const cruzdb_proto::AfterImage& i,
       uint64_t pos, int index) const;

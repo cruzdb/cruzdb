@@ -10,7 +10,7 @@ namespace cruzdb {
 // addresses...
 
 // TODO: if usage goes above high marker block new txns
-static const size_t low_marker  =  4*1024*1024;
+static const size_t low_marker  =  128*1024*1024;
 //static const size_t high_marker = 8*1024*1024;
 
 void NodeCache::do_vaccum_()
@@ -25,14 +25,21 @@ void NodeCache::do_vaccum_()
     if (stop_)
       return;
 
-    std::list<std::vector<std::pair<int64_t, int>>> traces;
+    std::list<std::vector<NodeAddress>> traces;
     traces_.swap(traces_);
 
     l.unlock();
 
     // apply lru updates
     for (auto trace : traces) {
-      for (auto key : trace) {
+      for (auto address : trace) {
+
+        // TODO: we'll need to figure out a solution for converting addresses or
+        // using another cache index. we don't want to take a lock for every
+        // conversion. at the moment, it doesn't really matter: we can drop
+        // anything from the cache and the system must still run correctly.
+        auto key = std::make_pair<int64_t, int>(
+            address.Position(), address.Offset());
 
         auto slot = pair_hash()(key) % num_slots_;
         auto& shard = shards_[slot];
@@ -79,9 +86,14 @@ void NodeCache::do_vaccum_()
 
 // when resolving a node we only resolve the single node. figuring out when to
 // resolve an entire intention would be interesting.
-SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
-    int64_t csn, int offset)
+SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
+    boost::optional<NodeAddress>& address)
 {
+  auto offset = address->Offset();
+  auto csn = address->Position();
+  if (!address->IsAfterImage()) {
+    csn = IntentionToAfterImage(csn);
+  }
   auto key = std::make_pair(csn, offset);
 
   auto slot = pair_hash()(key) % num_slots_;
@@ -129,7 +141,6 @@ SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
   auto i = log_entry.after_image();
 
   auto nn = deserialize_node(i, csn, offset);
-  assert(nn->read_only());
 
   // add to cache. make sure it didn't show up after we released the lock to
   // read the node from the log.
@@ -189,7 +200,7 @@ NodePtr NodeCache::CacheAfterImage(const cruzdb_proto::AfterImage& i,
     uint64_t pos)
 {
   if (i.tree_size() == 0) {
-    NodePtr ret(Node::Nil(), nullptr, true);
+    NodePtr ret(Node::Nil(), nullptr);
     return ret;
   }
 
@@ -199,8 +210,6 @@ NodePtr NodeCache::CacheAfterImage(const cruzdb_proto::AfterImage& i,
 
     // no locking on deserialize_node is OK
     nn = deserialize_node(i, pos, idx);
-
-    assert(nn->read_only());
 
     auto key = std::make_pair(pos, idx);
 
@@ -230,10 +239,8 @@ NodePtr NodeCache::CacheAfterImage(const cruzdb_proto::AfterImage& i,
   }
 
   assert(nn != nullptr);
-  NodePtr ret(nn, db_, false);
-  ret.set_csn(pos);
-  ret.set_offset(idx - 1);
-  ret.set_read_only();
+  NodePtr ret(nn, db_);
+  ret.SetAfterImageAddress(pos, idx - 1);
   return ret;
 }
 
@@ -245,45 +252,41 @@ SharedNodeRef NodeCache::deserialize_node(const cruzdb_proto::AfterImage& i,
   auto nn = std::make_shared<Node>(n.key(), n.val(), n.red(),
       nullptr, nullptr, i.intention(), false, db_);
 
-  // the left and right pointers are undefined. make sure to handle the case
-  // correctly in which a child is nil vs defined on storage but not resolved
-  // into the heap.
-
   if (!n.left().nil()) {
-    nn->left.set_offset(n.left().off());
+    uint64_t position;
+    uint16_t offset = n.left().off();
     if (n.left().self()) {
-      nn->left.set_csn(pos);
+      position = pos;
     } else {
-      nn->left.set_csn(n.left().csn());
+      position = n.left().csn();
     }
-    //ResolveNodePtr(nn->left);
+    nn->left.SetAfterImageAddress(position, offset);
   } else {
     nn->left.set_ref(Node::Nil());
   }
 
   if (!n.right().nil()) {
-    nn->right.set_offset(n.right().off());
+    uint64_t position;
+    uint16_t offset = n.right().off();
     if (n.right().self()) {
-      nn->right.set_csn(pos);
+      position = pos;
     } else {
-      nn->right.set_csn(n.right().csn());
+      position = n.right().csn();
     }
-    //ResolveNodePtr(nn->right);
+    nn->right.SetAfterImageAddress(position, offset);
   } else {
     nn->right.set_ref(Node::Nil());
   }
-
-  nn->set_read_only();
 
   return nn;
 }
 
 NodePtr NodeCache::ApplyAfterImageDelta(
     const std::vector<SharedNodeRef>& delta,
-    uint64_t pos)
+    uint64_t after_image_pos)
 {
   if (delta.empty()) {
-    NodePtr ret(Node::Nil(), nullptr, true);
+    NodePtr ret(Node::Nil(), nullptr);
     return ret;
   }
 
@@ -291,7 +294,7 @@ NodePtr NodeCache::ApplyAfterImageDelta(
   for (auto nn : delta) {
     nn->set_read_only();
 
-    auto key = std::make_pair(pos, offset);
+    auto key = std::make_pair(after_image_pos, offset);
 
     auto slot = pair_hash()(key) % num_slots_;
     auto& shard = shards_[slot];
@@ -311,10 +314,8 @@ NodePtr NodeCache::ApplyAfterImageDelta(
   }
 
   auto root = delta.back();
-  NodePtr ret(root, db_, false);
-  ret.set_csn(pos);
-  ret.set_offset(offset - 1);
-  ret.set_read_only();
+  NodePtr ret(root, db_);
+  ret.SetAfterImageAddress(after_image_pos, offset - 1);
   return ret;
 }
 

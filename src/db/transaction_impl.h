@@ -17,10 +17,9 @@ class DBImpl;
  */
 class TransactionImpl : public Transaction {
  public:
-  TransactionImpl(DBImpl *db, NodePtr root, int64_t root_intention,
-      uint64_t max_intention_resolvable, int64_t rid) :
+  TransactionImpl(DBImpl *db, NodePtr root, int64_t root_intention, int64_t rid) :
     db_(db),
-    tree_(db, root, max_intention_resolvable, rid),
+    tree_(db, root, rid),
     committed_(false),
     aborted_(false)
   {
@@ -43,7 +42,6 @@ class TransactionImpl : public Transaction {
   void MarkCommitted() {
     committed_ = true;
   }
-
 
   cruzdb_proto::Intention& GetIntention() {
     return intention_;
