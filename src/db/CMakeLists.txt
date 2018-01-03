@@ -24,9 +24,6 @@ install(TARGETS cruzdb LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 add_executable(thrash thrash.cc)
 target_link_libraries(thrash cruzdb)
 
-add_executable(rbt rbt.cc)
-target_link_libraries(rbt cruzdb)
-
 add_executable(bench bench.cc)
 target_link_libraries(bench cruzdb)
 if (CMAKE_BUILD_TYPE STREQUAL "Coverage")

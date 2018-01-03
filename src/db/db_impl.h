@@ -60,22 +60,12 @@ class DBImpl : public DB {
   friend class NodePtr;
   friend class IteratorTraceApplier;
 
-  void write_dot_recursive(std::ostream& out, int64_t rid,
-      SharedNodeRef node, uint64_t& nullcount, bool scoped);
-  void write_dot_null(std::ostream& out, SharedNodeRef node, uint64_t& nullcount);
-  void write_dot_node(std::ostream& out, SharedNodeRef parent,
-      NodePtr& child, const std::string& dir);
-  void _write_dot(std::ostream& out, SharedNodeRef root, uint64_t& nullcount, bool scoped = false);
-
   int _validate_rb_tree(SharedNodeRef root);
   void validate_rb_tree(NodePtr root);
 
  public:
 
-  void write_dot(std::ostream& out, bool scoped = false);
-  void write_dot_history(std::ostream& out,
-      std::vector<Snapshot*>& snapshots) override;
-  void validate() override {
+  void validate() {
     const auto snapshot = root_;
     validate_rb_tree(snapshot);
   }
@@ -114,9 +104,6 @@ class DBImpl : public DB {
   void UpdateLRU(std::vector<NodeAddress>& trace) {
     cache_.UpdateLRU(trace);
   }
-
-  void print_path(std::ostream& out, std::deque<SharedNodeRef>& path);
-  void print_node(SharedNodeRef node);
 
   std::mutex lock_;
   zlog::Log *log_;
