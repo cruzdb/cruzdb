@@ -16,30 +16,15 @@ using WeakNodeRef = std::weak_ptr<Node>;
 
 class DBImpl;
 
-/*
- * The read-only flag is a temporary hack for enforcing read-only property on
- * the connected Node. What is really needed is a more sophisticated approach
- * that avoids duplicating the read-only flag as well as what is probably some
- * call overhead associated with this design. Overall, this isn't pretty but
- * lets us have confidence in the correctness which is the priority right now.
- * There is probably a lot of overhead always returning copies of the
- * shared_ptr NodeRef.
- *
- * The NodePtr can point to Nil, which is represented by a NodeRef singleton.
- * In this case ref() will resolve to the singleton heap address. Never let
- * the Nil object be freed!
- *
- * In order to handle I/O errors gracefully, including timeouts, etc... we
- * probably will want to allow NodePtr::ref return an error when resolving
- * pointers from storage.
- *
- * Copy assertion should check if we are copying a null pointer that the
- * physical address is defined.
- *
- * TODO: add locking to various constructors
- * TODO: formalize rel between Nil and address = boost::none
- */
-
+// The physical address of a tree node in the log. All nodes are stored in a
+// serialized form of an after image. The offset points to the location of the
+// node in the serialized after image. The position points to an addressable
+// location in the log. The position may point to an after image, or it may
+// point to an intention. When pointing at an intention, the corresponding after
+// image containing the target node is the first after image in the log,
+// following the intention, that is associated with the intention. Multiple
+// after images may exist for the same intention, and all except the first may
+// be ignored.
 class NodeAddress {
  public:
   NodeAddress(uint64_t position, uint16_t offset, bool is_afterimage) :
@@ -64,6 +49,10 @@ class NodeAddress {
   bool is_afterimage_;
 };
 
+/*
+ * TODO: add locking to various constructors
+ * TODO: formalize rel between Nil and address = boost::none
+ */
 class NodePtr {
  public:
   NodePtr(const NodePtr& other) {
