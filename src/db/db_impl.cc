@@ -510,57 +510,9 @@ void DBImpl::TransactionProcessor()
     auto i_info = pending_intentions_.front();
     pending_intentions_.pop_front();
 
-    // TODO: we create a transaction here that we will replay the operations
-    // against. we end up throwing the transaction away at the end and only
-    // keeping the resulting tree. there are probably other inefficiencies here
-    // too, such as recording all the ops, again. so there is some optimization
-    // that can be done here.
-    //
-    // NOTE: its important that we use the pos here for the root id so we can
-    // assign some identity. we need to match up the serialization of the after
-    // image with the intention, and also identify duplicates when processing
-    // after images. this is also used to propogate the intention position
-    // through to node pointers so that they can resolve back to physical
-    // pointers later... it's like a virus that will affect future transactions.
-    //
-    // max intent resovl: this is for stopping propogation of volatile pointers
-#if 0
-    uint64_t max_intention_resolvable = -1;
-    {
-      auto it = intention_to_after_image_pos_.rbegin();
-      if (it != intention_to_after_image_pos_.rend()) {
-        max_intention_resolvable = it->first;
-      }
-    }
-#endif
+    auto next_root = std::make_unique<PersistentTree>(this, root_, (int64_t)i_info.first);
 
-#if 0
-    is there any risk here of having max intent pointing at the same intent that
-      we are procesing right now? i think not because any after image would have
-      to come strictly after that and we process in log order... but... another
-      node could have processed it and appened, and we end up reading it while
-      we are doing this???
-
-      does this pose any problem?
-
-      i think it will be fine. basically wed just end up copying a full verison
-      of a pointer. and infect self pointers method will: skip any nodes that
-      are fully specified.
-
-      hmm.. I THInk there is a scenario in which self-pointers would be fully
-      spefieied and then infect-self below would overwrite. im tempted to say
-      that that woudl be ok because it could be resolved naturally later, but
-      perhaps we want to also check for the condition and skip it.
-#endif
-
-   // here we replay the transaction against a snapshot of the database. it
-   // could be the original snapshot, or a future snapshot. if it is the same,
-   // then, there is no need to actually do commit/abort processing.
-
-   // std::cout << "txn-replay: intent @ " << i_info.first << std::endl;
-    auto txn_wrapper = std::make_unique<PersistentTree>(this, root_, (int64_t)i_info.first);
-
-    assert(txn_wrapper->rid() >= 0);
+    assert(next_root->rid() >= 0);
 
     lk.unlock();
 
@@ -702,14 +654,14 @@ void DBImpl::TransactionProcessor()
         case cruzdb_proto::TransactionOp::PUT:
           assert(op.has_val());
           //std::cout << "   txn-replay: Put(" << op.key() << ")" << std::endl;
-          //std::cout << "ServerPut " << txn_wrapper.get() << std::endl;
-          txn_wrapper->Put(op.key(), op.val());
+          //std::cout << "ServerPut " << next_root.get() << std::endl;
+          next_root->Put(op.key(), op.val());
           read_only = false;
           break;
 
         case cruzdb_proto::TransactionOp::DELETE:
           assert(!op.has_val());
-          txn_wrapper->Delete(op.key());
+          next_root->Delete(op.key());
           read_only = false;
           break;
 
@@ -747,7 +699,7 @@ void DBImpl::TransactionProcessor()
     // also we need to do this without hte db lock since we might try to resolve
     // some pointers in here. ideally we do not need to resolve shit. so we'll
     // need to figure that out later.
-    int root_offset = txn_wrapper->infect_self_pointers(i_info.first);
+    int root_offset = next_root->infect_self_pointers(i_info.first);
 
     lk.lock();
 
@@ -780,10 +732,10 @@ void DBImpl::TransactionProcessor()
     // TODO: filling in csn during after image replay races with whatever the
     // current root is which copies of nodes are being made during intention
     // replay.
-    NodePtr root(txn_wrapper->root_, this);
+    NodePtr root(next_root->root_, this);
 
     // TODO: this may be Nil... in which case the asserts below are wrong
-    assert(txn_wrapper->root_ != Node::Nil());
+    assert(next_root->root_ != Node::Nil());
     // TODO: watch out for scenarios in which the delta is empty and we are now
     // referencing a root node i the after image that is unchanged, yet we treat
     // here like it is coming from a new intention. we shouldn't ever encounter
@@ -798,7 +750,7 @@ void DBImpl::TransactionProcessor()
 
     // TODO: uncached_roots is a better name, and we don't need to have multiple
     // queus, so get rid of the shared pointer.
-    unwritten_roots_.emplace_back(i_info.first, std::move(txn_wrapper));
+    unwritten_roots_.emplace_back(i_info.first, std::move(next_root));
     unwritten_roots_cond_.notify_one();
   }
 }
