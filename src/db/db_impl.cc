@@ -490,6 +490,112 @@ void DBImpl::LogReader()
   }
 }
 
+bool DBImpl::ProcessConcurrentIntention(const cruzdb_proto::Intention& intention)
+{
+  auto snapshot = intention.snapshot_intention();
+  assert(snapshot < root_intention_); // concurrent property
+
+  auto it = intention_map_.find(snapshot);
+  assert(it != intention_map_.end());
+  it++; // start immediately after snapshot
+
+  // set of keys read or written by the intention
+  std::set<std::string> intention_keys;
+  for (int i = 0; i < intention.ops_size(); i++) {
+    auto& op = intention.ops(i);
+    intention_keys.insert(op.key());
+  }
+
+  while (true) {
+    // next intention to examine for conflicts
+    assert(it != intention_map_.end());
+    uint64_t intent_pos = *it;
+
+    // read intention from the log
+    std::string data;
+    int ret = log_->Read(intent_pos, &data);
+    assert(ret == 0);
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+    assert(entry.msg_case() == cruzdb_proto::LogEntry::kIntention);
+
+    // set of keys modified by the intention in the conflict zone
+    const auto& other_intention = entry.intention();
+    std::set<std::string> other_intention_keys;
+    for (int i = 0; i < other_intention.ops_size(); i++) {
+      auto& op = other_intention.ops(i);
+      if (op.op() == cruzdb_proto::TransactionOp::PUT ||
+          op.op() == cruzdb_proto::TransactionOp::DELETE) {
+        other_intention_keys.insert(op.key());
+      }
+    }
+
+    // return abort=true if the set of keys intersect
+    for (auto k0 : intention_keys) {
+      if (other_intention_keys.find(k0) !=
+          other_intention_keys.end()) {
+        return true;
+      }
+    }
+
+    if (intent_pos == (uint64_t)root_intention_)
+      break;
+
+    it++;
+  }
+
+  return false;
+}
+
+void DBImpl::NotifyTransaction(int64_t token, uint64_t intention_pos,
+    bool committed)
+{
+  auto it = pending_txns_.find(token);
+  if (it != pending_txns_.end()) {
+    auto waiter = it->second;
+    pending_txns_.erase(it);
+    waiter->pos = intention_pos;
+    waiter->committed = committed;
+    waiter->complete = true;
+    waiter->cond.notify_one();
+  }
+}
+
+void DBImpl::ReplayIntention(PersistentTree *tree,
+    const cruzdb_proto::Intention& intention)
+{
+  bool read_only = true;
+  for (int idx = 0; idx < intention.ops_size(); idx++) {
+    auto& op = intention.ops(idx);
+    switch (op.op()) {
+      case cruzdb_proto::TransactionOp::GET:
+        assert(!op.has_val());
+        break;
+
+      case cruzdb_proto::TransactionOp::PUT:
+        assert(op.has_val());
+        tree->Put(op.key(), op.val());
+        read_only = false;
+        break;
+
+      case cruzdb_proto::TransactionOp::DELETE:
+        assert(!op.has_val());
+        tree->Delete(op.key());
+        read_only = false;
+        break;
+
+      default:
+        assert(0);
+        exit(1);
+    }
+  }
+  // nothing wrong with these, but haven't yet considered if handling them is a
+  // special case or deserves an optimization.
+  assert(intention.ops_size());
+  assert(!read_only);
+}
+
 void DBImpl::TransactionProcessor()
 {
   while (true) {
@@ -507,227 +613,59 @@ void DBImpl::TransactionProcessor()
     if (stop_)
       return;
 
-    auto i_info = pending_intentions_.front();
+    // the intentions are processed in strict fifo order
+    const auto i_info = pending_intentions_.front();
     pending_intentions_.pop_front();
 
-    auto next_root = std::make_unique<PersistentTree>(this, root_, (int64_t)i_info.first);
+    const auto intention_pos = i_info.first;
+    const auto& intention = i_info.second;
 
-    assert(next_root->rid() >= 0);
+    // the next root starts with the current root as its snapshot
+    auto next_root = std::make_unique<PersistentTree>(this, root_,
+        static_cast<int64_t>(intention_pos));
 
     lk.unlock();
 
-    auto& intention = i_info.second;
-
-    // TODO: if the intentions snapshot is the last committed state, then we
-    // don't need to check for conflicts.
-    //
-    // TODO: it may be possible that we want to predict that there are very few
-    // concurrent transactions, and in this case we go ahead and seralize the
-    // after image with an intention. in these cases we could use that after
-    // image for serial transactions, and avoid producing after images in these
-    // cases.
-
-    // commit/abort
-    //
-    // i_info.first: the address of the intention that we are replaying
-    // root_/root_intention: the last commit state / intention that produced it
-    // intention.snapshot_intention: the address of the snapshot/intention that i_info.first ran against
-
-    // TODO: initialization is tricky. currently for an empty db we just
-    // intialize against an in-memory root pointer to Nil, and root_intention_
-    // is -1 initially, because, what else would it be? so i think this here
-    // just shows a good case for making sure initialization includes some
-    // on-disk data.
-#if 0
-    if (root_intention_ < 0) {
-      std::cout << root_intention_ << std::endl;
-      assert(root_intention_ >= 0);
-    }
-#endif
+    // TODO: get rid of root_intention_. how is initialization handled?
     assert(root_intention_ < (int64_t)i_info.first);
     auto serial = root_intention_ == intention.snapshot_intention();
 
-    bool abort = false;
+    // check for transaction conflicts
+    bool abort;
     if (serial) {
-      // this is the case in which we can avoid replaying. if we have the
-      // in-memory after image because the transaction executed locally, then
-      // use that. otherwise, we can make a decision to either wait for an after
-      // image to show up in the log, or replay here without checking for
-      // commit/abort.
+      abort = false;
     } else {
-      /*
-       * TODO: we need to find a good way to manage the intention map index. we
-       * can also search the log within a range to find the intentions, we could
-       * embed backpointers in intentions, we could keep a small index in lmdb
-       * of everything. some of this info can also be kept nodeptr and erived
-       * from cached nodes. lots of options...
-       */
-      auto si = intention.snapshot_intention();
-      assert(si < root_intention_);
-
-      auto it = intention_map_.find(si);
-      assert(it != intention_map_.end());
-      it++; // start immediately after si
-
-      int logical_cz_size = 0;
-      // obviously this is crazy inefficient...
-      while (true) {
-        uint64_t intent_pos = *it;
-
-        std::string data;
-        int ret = log_->Read(intent_pos, &data);
-        assert(ret == 0);
-        cruzdb_proto::LogEntry entry;
-        assert(entry.ParseFromString(data));
-        assert(entry.IsInitialized());
-        assert(entry.msg_case() == cruzdb_proto::LogEntry::kIntention);
-        auto check_intention = entry.intention();
-
-        logical_cz_size++;
-
-        // TODO: this just looks at PUT/PUT for now. we'll need to expand to
-        // many other types of conflicts...
-        for (int i = 0; i < intention.ops_size(); i++) {
-          auto& iop = intention.ops(i);
-          if (iop.op() == cruzdb_proto::TransactionOp::PUT) {
-            for (int j = 0; j < check_intention.ops_size(); j++) {
-              auto& jop = check_intention.ops(j);
-              if (jop.op() == cruzdb_proto::TransactionOp::PUT &&
-                  iop.key() == jop.key()) {
-                abort = true;
-                // could just bail early here
-              }
-            }
-          }
-        }
-
-        assert(root_intention_ >= 0);
-        if (intent_pos == (uint64_t)root_intention_)
-          break;
-
-        it++;
-        assert(it != intention_map_.end());
-      }
-
-      // this is printing out the distance in log positions. we also might want
-      // to know how many intentions are in the conflict zone.
-      // checkout std::distance
-      assert(logical_cz_size > 0);
-      std::cout << "conflict zone size: " <<
-        (root_intention_ - si) << " logical size " <<
-        logical_cz_size << std::endl;
+      abort = ProcessConcurrentIntention(intention);
     }
 
+    // if aborting, notify waiters, then move on to next txn
     if (abort) {
       lk.lock();
-
-      // notify the transaction waiter?
-      auto token = intention.token();
-      auto it = pending_txns_.find(token);
-      if (it != pending_txns_.end()) {
-        auto waiter = it->second;
-        pending_txns_.erase(it);
-        waiter->pos = i_info.first;
-        waiter->committed = false;
-        waiter->complete = true;
-        waiter->cond.notify_one();
-      }
-
-      last_intention_processed = i_info.first;
-      
+      NotifyTransaction(intention.token(), intention_pos, false);
+      last_intention_processed = intention_pos;
       continue;
     }
 
-    // the txn for this intention commited. its the next in line
-    auto imret = intention_map_.emplace(i_info.first);
-    assert(imret.second);
-
-    int idx;
-    bool read_only = true;
-    for (idx = 0; idx < intention.ops_size(); idx++) {
-      auto& op = intention.ops(idx);
-      switch (op.op()) {
-        case cruzdb_proto::TransactionOp::GET:
-          assert(!op.has_val());
-          break;
-
-        case cruzdb_proto::TransactionOp::PUT:
-          assert(op.has_val());
-          //std::cout << "   txn-replay: Put(" << op.key() << ")" << std::endl;
-          //std::cout << "ServerPut " << next_root.get() << std::endl;
-          next_root->Put(op.key(), op.val());
-          read_only = false;
-          break;
-
-        case cruzdb_proto::TransactionOp::DELETE:
-          assert(!op.has_val());
-          next_root->Delete(op.key());
-          read_only = false;
-          break;
-
-        default:
-          assert(0);
-          exit(1);
-      }
+    // save the location of the next intention that committed. note for the
+    // future: we are not holding any locks here because this thread has
+    // execlusive access to this index.
+    {
+      auto ret = intention_map_.emplace(intention_pos);
+      assert(ret.second);
     }
 
-    if (idx == 0) {
-      //std::cout << "warning: empty transaction" << std::endl;
-      assert(0); // these may cause problem for the assumption below in which we have new root
-    }
+    ReplayIntention(next_root.get(), intention);
 
-    // nothing wrong RO transactions, but we might want to handle them in a
-    // special way later, or treat them differently depending on the isolation
-    // level.
-    if (read_only) {
-      //std::cout << "info: read only transaction" << std::endl;
-      assert(0); // these may cause problem for the assumption below in which we have new root
-    }
-
-    // before we let new transaction start running against this new after image,
-    // we need to infect its pointers so that when copies of the nodes in this
-    // after image are made, which may refer to nodes that do not yet have
-    // physical addresses, that they contain information sufficient to resolves
-    // those missing locations.
-    //
-    // issues: speed: we could probably do some of this work in parallel with
-    // transaction processing if we are smart about it. we could also trade
-    // memory for time, keep nodes cached for a longer period of time, and index
-    // on node heap pointers instead of setting the offset/intention position
-    // here.
-    // 
-    // also we need to do this without hte db lock since we might try to resolve
-    // some pointers in here. ideally we do not need to resolve shit. so we'll
-    // need to figure that out later.
-    int root_offset = next_root->infect_self_pointers(i_info.first);
+    // mark all pointers in this delta that do not have a physical address with
+    // the address of the intention. we can't use the after image because it
+    // hasn't been created yet. instead the nodes are marked with the intention
+    // address. as more transactions execute, this address is propogated and
+    // fixed up later.
+    int root_offset = next_root->infect_self_pointers(intention_pos);
 
     lk.lock();
 
-    // notify the transaction waiter?
-    auto token = intention.token();
-    auto it = pending_txns_.find(token);
-    if (it != pending_txns_.end()) {
-      auto waiter = it->second;
-      pending_txns_.erase(it);
-      waiter->pos = i_info.first;
-      waiter->committed = true;
-      waiter->complete = true;
-      waiter->cond.notify_one();
-    } else {
-      // we rendezvous on the position of the intention. but its possible that
-      // the intention was processed here before the client had a chance to
-      // stick it in the pending index after performing the append. two options:
-      //
-      // 1.. put a unique value in the log entry and rendezvous on that, or,
-      // cache the answers and have the client look too. this last option is
-      // certainly robust, but we need to be careful that the index doesn't
-      // become too large. that shouldn't be a problem. this case is fairly
-      // narrow, and we can also trim this index aggressively (i think).
-
-      // ok, so we probably want a nonce for clients. so we'll use that method
-      // of rendezvous. we can also keep an index. lets also figure out we can
-      // build an index so we can look it up from the log?
-    }
+    NotifyTransaction(intention.token(), intention_pos, true);
 
     // TODO: filling in csn during after image replay races with whatever the
     // current root is which copies of nodes are being made during intention

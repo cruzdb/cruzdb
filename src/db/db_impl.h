@@ -116,6 +116,9 @@ class DBImpl : public DB {
   // producing a new last-committed-state for the database. after images are
   // queued for handling by the transaction writer.
   void TransactionProcessor();
+  bool ProcessConcurrentIntention(const cruzdb_proto::Intention& intention);
+  void NotifyTransaction(int64_t token, uint64_t intention_pos, bool committed);
+  void ReplayIntention(PersistentTree *tree, const cruzdb_proto::Intention& intention);
 
   // schedules the serialization and writing of in-memory after images produced
   // by the transaction processor when committing an intention from the log.
