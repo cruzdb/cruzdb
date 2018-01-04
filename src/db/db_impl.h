@@ -23,10 +23,6 @@
 
 namespace cruzdb {
 
-std::ostream& operator<<(std::ostream& out, const SharedNodeRef& n);
-std::ostream& operator<<(std::ostream& out, const cruzdb_proto::NodePtr& p);
-std::ostream& operator<<(std::ostream& out, const cruzdb_proto::Node& n);
-std::ostream& operator<<(std::ostream& out, const cruzdb_proto::AfterImage& i);
 
 class DBImpl : public DB {
  public:

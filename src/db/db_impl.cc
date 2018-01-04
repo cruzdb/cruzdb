@@ -263,52 +263,6 @@ int DBImpl::RestoreFromLog()
   }
 }
 
-std::ostream& operator<<(std::ostream& out, const SharedNodeRef& n)
-{
-  out << "node(" << n.get() << "):" << n->key().ToString() << ": ";
-#if 0 // TODO: fixup for new addressing
-  out << (n->red() ? "red " : "blk ");
-  //out << "fi " << n->field_index() << " ";
-  out << "left=[p" << n->left.csn() << ",o" << n->left.offset() << ",";
-  if (n->left.ref_notrace() == Node::Nil())
-    out << "nil";
-  else
-    out << n->left.ref_notrace().get();
-  out << "] ";
-  out << "right=[p" << n->right.csn() << ",o" << n->right.offset() << ",";
-  if (n->right.ref_notrace() == Node::Nil())
-    out << "nil";
-  else
-    out << n->right.ref_notrace().get();
-  out << "] ";
-#endif
-  return out;
-}
-
-std::ostream& operator<<(std::ostream& out, const cruzdb_proto::NodePtr& p)
-{
-  out << "[n" << p.nil() << ",s" << p.self()
-    << ",p" << p.csn() << ",o" << p.off() << "]";
-  return out;
-}
-
-std::ostream& operator<<(std::ostream& out, const cruzdb_proto::Node& n)
-{
-  out << "key " << n.key() << " val " << n.val() << " ";
-  out << (n.red() ? "red" : "blk") << " ";
-  out << "left " << n.left() << " right " << n.right();
-  return out;
-}
-
-std::ostream& operator<<(std::ostream& out, const cruzdb_proto::AfterImage& i)
-{
-  out << "- intention tree_size = " << i.tree_size() << std::endl;
-  for (int idx = 0; idx < i.tree_size(); idx++) {
-    out << "  " << idx << ": " << i.tree(idx) << std::endl;
-  }
-  return out;
-}
-
 /*
  *
  */
