@@ -558,7 +558,7 @@ void DBImpl::TransactionProcessor()
    // then, there is no need to actually do commit/abort processing.
 
    // std::cout << "txn-replay: intent @ " << i_info.first << std::endl;
-    auto txn_wrapper = std::make_shared<PersistentTree>(this, root_, (int64_t)i_info.first);
+    auto txn_wrapper = std::make_unique<PersistentTree>(this, root_, (int64_t)i_info.first);
 
     assert(txn_wrapper->rid() >= 0);
 
@@ -777,11 +777,6 @@ void DBImpl::TransactionProcessor()
       // build an index so we can look it up from the log?
     }
 
-    // TODO: uncached_roots is a better name, and we don't need to have multiple
-    // queus, so get rid of the shared pointer.
-    unwritten_roots_.emplace_back(i_info.first, txn_wrapper);
-    unwritten_roots_cond_.notify_one();
-
     // TODO: filling in csn during after image replay races with whatever the
     // current root is which copies of nodes are being made during intention
     // replay.
@@ -800,6 +795,11 @@ void DBImpl::TransactionProcessor()
     root_.replace(root);
 
     last_intention_processed = i_info.first;
+
+    // TODO: uncached_roots is a better name, and we don't need to have multiple
+    // queus, so get rid of the shared pointer.
+    unwritten_roots_.emplace_back(i_info.first, std::move(txn_wrapper));
+    unwritten_roots_cond_.notify_one();
   }
 }
 
@@ -915,9 +915,9 @@ void DBImpl::TransactionWriter()
      *
      * we start with the oldest node...
      */
-    auto root_info = unwritten_roots_.front();
+    auto root_info = std::move(unwritten_roots_.front());
     unwritten_roots_.pop_front();
-    auto root = root_info.second;
+    auto root = std::move(root_info.second);
     lk.unlock();
 
     // serialize the after image to the end of the log. note that by design, any

@@ -168,7 +168,7 @@ class DBImpl : public DB {
   // TODO: scheduling (when to write, if to write) is a big part of the work the
   // transaction writer does. also, it should be possible in principle to unify
   // this set with the uncached_roots_ set...
-  std::list<std::pair<uint64_t, std::shared_ptr<PersistentTree>>> unwritten_roots_;
+  std::list<std::pair<uint64_t, std::unique_ptr<PersistentTree>>> unwritten_roots_;
   std::condition_variable unwritten_roots_cond_;
 
   std::list<std::pair<uint64_t, cruzdb_proto::AfterImage>> pending_after_images_;
