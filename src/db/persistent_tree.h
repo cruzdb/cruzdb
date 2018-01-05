@@ -45,8 +45,7 @@ class PersistentTree {
     db_(db),
     src_root_(root),
     root_(nullptr),
-    rid_(rid),
-    max_intention_resolvable_(-1) // TODO: remove
+    rid_(rid)
   {}
 
  public:
@@ -64,7 +63,7 @@ class PersistentTree {
 
   // serialization and fix-up
  public:
-  int infect_self_pointers(uint64_t intention);
+  boost::optional<int> infect_self_pointers(uint64_t intention);
   void SerializeAfterImage(cruzdb_proto::AfterImage& i,
       uint64_t intention,
       std::vector<SharedNodeRef>& delta);
@@ -150,8 +149,6 @@ class PersistentTree {
    private:
     PersistentTree *tree_;
   };
-
-  int64_t max_intention_resolvable_;
 
   // access trace used to update lru cache. the trace is applied and reset
   // after each operation (e.g. get/put/etc) or if the transaction accesses

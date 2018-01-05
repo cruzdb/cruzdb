@@ -5,19 +5,25 @@
 
 namespace cruzdb {
 
-DBImpl::DBImpl(zlog::Log *log) :
+DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   log_(log),
   cache_(this),
   stop_(false),
   in_flight_txn_rid_(-1),
   txn_token(0),
-  root_(Node::Nil(), this),
-  root_intention_(-1),
-  txn_writer_(std::thread(&DBImpl::TransactionWriter, this)),
-  txn_processor_(std::thread(&DBImpl::TransactionProcessor, this)),
-  txn_finisher_(std::thread(&DBImpl::TransactionFinisher, this))
+  root_(Node::Nil(), this)
 {
-  validate_rb_tree(root_);
+  auto root = cache_.CacheAfterImage(point.after_image, point.after_image_pos);
+  root_.replace(root);
+
+  root_intention_ = point.after_image.intention();
+  log_reader_pos = point.replay_start_pos;
+  last_intention_processed = root_intention_;
+
+  txn_writer_ = std::thread(&DBImpl::TransactionWriter, this);
+  txn_processor_ = std::thread(&DBImpl::TransactionProcessor, this);
+  txn_finisher_ = std::thread(&DBImpl::TransactionFinisher, this);
+  log_reader_ = std::thread(&DBImpl::LogReader, this);
 }
 
 int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
@@ -26,50 +32,62 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
   int ret = log->CheckTail(&tail);
   assert(ret == 0);
 
-  // empty log
   if (tail == 0) {
     if (!create_if_empty) {
-      assert(0);
       return -EINVAL;
     }
 
-    // TODO: this initialization might be a race when we assume that multiple
-    // nodes exist that all start-up at the same time and interact with an
-    // initially empty log...
-    //
-    // initialization uses an after image without a corresponding intention.
-    // that is, there is no transaction that initialized the log... it just is.
-#if 0
-    std::string blob;
-    cruzdb_proto::LogEntry entry;
-    auto ai = entry.mutable_after_image();
-    ai->set_snapshot(-1);
-    ai->set_intention(-1);
-    assert(entry.IsInitialized());
-    assert(entry.SerializeToString(&blob));
+    // write intention to position 0
+    {
+      cruzdb_proto::Intention intention;
+      intention.set_snapshot_intention(-1);
+      intention.set_token(0);
 
-    std::string blob;
-    cruzdb_proto::LogEntry entry;
-    auto intention = entry.mutable_intention();
-    intention->set_snapshot(-1);
-    assert(entry.IsInitialized());
-    assert(entry.SerializeToString(&blob));
+      cruzdb_proto::LogEntry entry;
+      entry.set_allocated_intention(&intention);
+      assert(entry.IsInitialized());
 
-    ret = log->Append(blob, &tail);
-    assert(ret == 0);
-#endif
+      std::string blob;
+      assert(entry.SerializeToString(&blob));
+      entry.release_intention();
+
+      uint64_t pos;
+      ret = log->Append(blob, &pos);
+      assert(ret == 0);
+      assert(pos == 0);
+    }
+
+    // write a corresponding after image. when/if we start adding some initial
+    // data to the database, then we'll need to make sure that this after image
+    // reflects that.
+    {
+      cruzdb_proto::AfterImage after_image;
+      after_image.set_intention(0);
+
+      cruzdb_proto::LogEntry entry;
+      entry.set_allocated_after_image(&after_image);
+      assert(entry.IsInitialized());
+
+      std::string blob;
+      assert(entry.SerializeToString(&blob));
+      entry.release_after_image();
+
+      uint64_t pos;
+      ret = log->Append(blob, &pos);
+      assert(ret == 0);
+      assert(pos > 0);
+    }
   }
 
-  DBImpl *impl = new DBImpl(log);
+  RestorePoint point;
+  uint64_t latest_intention;
+  ret = DBImpl::FindRestorePoint(log, point, latest_intention);
+  assert(ret == 0);
 
-  // TODO: in the short term we might want to explicitly initialize the log
-  // here, and figure out proper recovery later. for now we are going to just
-  // let the empty/init log entry stay in the log and we'll ignore it during
-  // processing.
+  DBImpl *impl = new DBImpl(log, point);
 
-  ret = impl->RestoreFromLog();
-  if (ret)
-    return ret;
+  // if there is stuff to roll forward
+  impl->WaitOnIntention(latest_intention);
 
   *db = impl;
 
@@ -98,169 +116,87 @@ DBImpl::~DBImpl()
   cache_.Stop();
 }
 
-/*
- * Log recovery:
- *   - scan the log backwards until we find the latest intention with a
- *   corresponding after image. then roll the log forward from that state.
- *
- *   - FIXME: the after image needs to be the first instance of the after image
- *   produced by the corresponding intention. so to make this robust, we should
- *   ensure that all log positions between the intention and the after image are
- *   filled.
- */
-int DBImpl::RestoreFromLog()
+int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
+    uint64_t& latest_intention)
 {
+  uint64_t pos;
+  int ret = log->CheckTail(&pos);
+  assert(ret == 0);
+
+  // log is empty?
+  if (pos == 0) {
+    return -EINVAL;
+  }
+
+  // intention_pos -> earliest (ai_pos, ai_blob)
   std::unordered_map<uint64_t,
     std::pair<uint64_t, cruzdb_proto::AfterImage>> after_images;
 
-  uint64_t pos;
-  int ret = log_->CheckTail(&pos);
-  assert(ret == 0);
+  bool set_latest_intention = false;
 
-  // TODO: this initialization process and transaction commit/abort redeznvous
-  // is so messed up :/
-  txn_token = pos;
-
-  const uint64_t real_tail = pos;
-
-  // currently an empty log is an ok starting point for a new database, but i
-  // think we'll want to add some explicit log entries for initialization later.
-  if (pos == 0) {
-    reader_initialized = true;
-    log_reader_pos = 0;
-    start_reader();
-    return 0;
-  }
-
-  int64_t newest_intention = -1;
-  int64_t oldest_intention = -1;
-
-  // start reading the log in reverse...
+  // scan log in reverse order
   while (true) {
     std::string data;
-    ret = log_->Read(pos, &data);
-    if (ret < 0 && ret != -ENOENT) {
-      // see comment on method about missing entries and correctness
+    ret = log->Read(pos, &data);
+    if (ret < 0) {
+      if (ret == -ENOENT) {
+        // see issue github #33
+        assert(pos > 0);
+        pos--;
+        continue;
+      }
       assert(0);
     }
 
-    if (ret == 0) {
-      cruzdb_proto::LogEntry entry;
-      assert(entry.ParseFromString(data));
-      assert(entry.IsInitialized());
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
 
-      switch (entry.msg_case()) {
-        case cruzdb_proto::LogEntry::kIntention:
-          {
-            oldest_intention = pos;
-            if (newest_intention == -1)
-              newest_intention = (int64_t)pos;
+    switch (entry.msg_case()) {
+      case cruzdb_proto::LogEntry::kIntention:
+       {
+         if (!set_latest_intention) {
+           latest_intention = pos;
+           set_latest_intention = true;
+         }
 
-            auto it = after_images.find(pos);
-            if (it != after_images.end()) {
-              std::cout << "recovery intention pos: " <<
-                pos << " newest intention " << newest_intention
-                << " tail " << real_tail << std::endl;
+         auto it = after_images.find(pos);
+         if (it != after_images.end()) {
+           // found a starting point, but still need to guarantee that the
+           // decision will remain valid: see github #33.
+           point.replay_start_pos = pos + 1;
+           point.after_image_pos = it->second.first;
+           point.after_image = it->second.second;
+           assert((int64_t)it->first == it->second.second.intention());
+           return 0;
+         }
+       }
+       break;
 
-              // the after image will be the new root
-              auto root = cache_.CacheAfterImage(it->second.second, it->second.first);
-              root_.replace(root);
-              // TODO: we should be either keeping this intention address in the
-              // pointer, or keeping a separate data structure for specific use
-              // cases that contains these mappings, or facilities for resolving
-              // it.
-              root_intention_ = it->second.second.intention();
-              assert(root_intention_ >= 0);
-              assert((int64_t)it->first == root_intention_);
-
-              // start replaying log from pos+1
-              reader_initialized = true;
-              log_reader_pos = pos + 1;
-
-              start_reader();
-
-              // wait until the log rolls forward. this just good to do (not in
-              // this way, of course we neeed better synchronization mechanisms
-              // here). this isn't strictly needed as we can always submit
-              // transactions against older snapshots and wait for
-              // commit/abort...however..we haven't implemented that yet...
-              assert((int64_t)pos <= newest_intention);
-              if ((int64_t)pos < newest_intention) { // already up to date?
-                while (last_intention_processed < newest_intention) {
-                  usleep(2000);
-                }
-              }
-
-              return 0;
-            }
+       // find the oldest version of each after image
+      case cruzdb_proto::LogEntry::kAfterImage:
+        {
+          assert(pos > 0);
+          auto ai = entry.after_image();
+          auto it = after_images.find(ai.intention());
+          if (it != after_images.end()) {
+            after_images.erase(it);
           }
-          break;
-
-        case cruzdb_proto::LogEntry::kAfterImage:
-          {
-            auto ai = entry.after_image();
-            //std::cout << "after image for intention " << ai.intention() << " at " << pos << std::endl;
-            after_images.emplace(ai.intention(), std::make_pair(pos, ai));
-          }
-          break;
-
-        default:
-          assert(0);
-          exit(1);
-      }
-    }
-
-    // made it pos 0 without recovering
-    if (pos == 0) {
-      // startup edge cases we'll need to think about. unlikely to happen
-      // anytime soon.
-      assert(oldest_intention >= 0);
-
-      // if we had an after image, it could only have been produced by an
-      // intention in the log that proceeded it.
-      assert(after_images.empty());
-
-      // so we'll start now with the oldest intention and roll forward. TODO..
-      // this is one reason we probably want a specific start transaction so
-      // that we can distinguish between weird crashes at start-up causing this
-      // cenario in which a bunch of txns ran, but their after images never got
-      // serialized.
-
-      // ok, this is just the same thing that happens above when we end up
-      // finding a after image / intention pair, except the root is just the
-      // already setup empty tree.
-      //auto root = cache_.CacheAfterImage(it->second.second, it->second.first);
-      //root_.replace(root);
-
-      // start replaying log from pos+1
-      reader_initialized = true;
-
-      // important: need to replay from here to produce a new starting after image!
-      log_reader_pos = oldest_intention;
-
-      start_reader();
-
-      // wait until the log rolls forward. this just good to do (not in
-      // this way, of course we neeed better synchronization mechanisms
-      // here). this isn't strictly needed as we can always submit
-      // transactions against older snapshots and wait for
-      // commit/abort...however..we haven't implemented that yet...
-      assert((int64_t)pos <= newest_intention);
-      if ((int64_t)pos < newest_intention) { // already up to date?
-        while (last_intention_processed < newest_intention) {
-          usleep(2000);
+          auto ret = after_images.emplace(ai.intention(), std::make_pair(pos, ai));
+          assert(ret.second);
         }
-      }
+        break;
 
-      return 0;
-
-      //std::cout << "real tail " << real_tail << " oldest int " << oldest_intention << std::endl;
-      //assert(0);
-      //return -EINVAL;
+      default:
+        assert(0);
+        exit(1);
     }
 
+    assert(pos > 0);
     pos--;
   }
+  assert(0);
+  exit(1);
 }
 
 /*
@@ -328,18 +264,6 @@ int DBImpl::Get(const zlog::Slice& key, std::string *value)
   return -ENOENT;
 }
 
-/*
- * TODO:
- *  - we will likely want to bound/throttle the number of inflight transactions
- *  so that slow transaction processing doesn't result in a massive back log of
- *  transactions that could create memory pressure or result in pathological
- *  conditions with processing extremely large conflict zones.
- *
- *  - add an assertion check here that the database state as been initialized.
- *  users shouldn't be able to interact with the instance until it is
- *  initialized, but we hit some issues during development related to this and
- *  this would be a good defensive check.
- */
 Transaction *DBImpl::BeginTransaction()
 {
   std::unique_lock<std::mutex> lk(lock_);
@@ -349,6 +273,30 @@ Transaction *DBImpl::BeginTransaction()
       in_flight_txn_rid_--);
 }
 
+void DBImpl::WaitOnIntention(uint64_t pos)
+{
+  bool done = false;
+  std::condition_variable cond;
+  std::unique_lock<std::mutex> lk(lock_);
+  if (pos <= last_intention_processed) {
+    return;
+  }
+  waiting_on_log_entry_.emplace(pos, std::make_pair(&cond, &done));
+  cond.wait(lk, [&] { return done; });
+}
+
+void DBImpl::NotifyIntention(uint64_t pos)
+{
+  auto first = waiting_on_log_entry_.begin();
+  auto last = waiting_on_log_entry_.upper_bound(pos);
+  std::for_each(first, last, [pos](auto& w) {
+    assert(w.first <= pos);
+    *w.second.second = true;
+    w.second.first->notify_one();
+  });
+  waiting_on_log_entry_.erase(first, last);
+}
+
 // TODO:
 //  - where does the log reader start from, and how does it progress. currently
 //  we are going to start from 0 because we are only considering new databases.
@@ -356,10 +304,10 @@ Transaction *DBImpl::BeginTransaction()
 //  image has been appened, but other nodes may also append, so we need to make
 //  sure to be checking with the sequencer. currently we are single node, so we
 //  are only dealing with the simple case...
+//
+//  create new log reader service
 void DBImpl::LogReader()
 {
-  assert(reader_initialized);
-
   while (true) {
     {
       std::lock_guard<std::mutex> l(lock_);
@@ -393,15 +341,6 @@ void DBImpl::LogReader()
          *
          * do timeout waits so we can see with print statements...
          */
-#if 0
-        if (++count % 1000000 == 0) {
-          uint64_t tail;
-          int ret = log_->CheckTail(&tail);
-          assert(ret == 0);
-          std::cout << "log reader no entry count " << count 
-            << " latest pos " << log_reader_pos << " tail " << tail << std::endl;
-        }
-#endif
         continue;
       }
       assert(0);
@@ -417,7 +356,6 @@ void DBImpl::LogReader()
     // semantics.
     switch (entry.msg_case()) {
       case cruzdb_proto::LogEntry::kIntention:
-        //std::cout << "log_reader: pos " << pos << " intention" << std::endl;
         {
           std::lock_guard<std::mutex> lk(lock_);
           pending_intentions_.emplace_back(log_reader_pos, entry.intention());
@@ -426,7 +364,6 @@ void DBImpl::LogReader()
         break;
 
       case cruzdb_proto::LogEntry::kAfterImage:
-        //std::cout << "log_reader: pos " << pos << " after image" << std::endl;
         {
           std::lock_guard<std::mutex> lk(lock_);
           pending_after_images_.emplace_back(log_reader_pos, entry.after_image());
@@ -514,12 +451,12 @@ void DBImpl::NotifyTransaction(int64_t token, uint64_t intention_pos,
     waiter->complete = true;
     waiter->cond.notify_one();
   }
+  NotifyIntention(intention_pos);
 }
 
 void DBImpl::ReplayIntention(PersistentTree *tree,
     const cruzdb_proto::Intention& intention)
 {
-  bool read_only = true;
   for (int idx = 0; idx < intention.ops_size(); idx++) {
     auto& op = intention.ops(idx);
     switch (op.op()) {
@@ -530,13 +467,11 @@ void DBImpl::ReplayIntention(PersistentTree *tree,
       case cruzdb_proto::TransactionOp::PUT:
         assert(op.has_val());
         tree->Put(op.key(), op.val());
-        read_only = false;
         break;
 
       case cruzdb_proto::TransactionOp::DELETE:
         assert(!op.has_val());
         tree->Delete(op.key());
-        read_only = false;
         break;
 
       default:
@@ -544,10 +479,6 @@ void DBImpl::ReplayIntention(PersistentTree *tree,
         exit(1);
     }
   }
-  // nothing wrong with these, but haven't yet considered if handling them is a
-  // special case or deserves an optimization.
-  assert(intention.ops_size());
-  assert(!read_only);
 }
 
 void DBImpl::TransactionProcessor()
@@ -580,8 +511,7 @@ void DBImpl::TransactionProcessor()
 
     lk.unlock();
 
-    // TODO: get rid of root_intention_. how is initialization handled?
-    assert(root_intention_ < (int64_t)i_info.first);
+    assert(root_intention_ < (int64_t)intention_pos);
     auto serial = root_intention_ == intention.snapshot_intention();
 
     // check for transaction conflicts
@@ -610,39 +540,22 @@ void DBImpl::TransactionProcessor()
 
     ReplayIntention(next_root.get(), intention);
 
-    // mark all pointers in this delta that do not have a physical address with
-    // the address of the intention. we can't use the after image because it
-    // hasn't been created yet. instead the nodes are marked with the intention
-    // address. as more transactions execute, this address is propogated and
-    // fixed up later.
-    int root_offset = next_root->infect_self_pointers(intention_pos);
+    auto root_offset = next_root->infect_self_pointers(intention_pos);
+
+    assert(next_root->root_ != nullptr);
+    NodePtr root(next_root->root_, this);
+    if (root_offset) {
+      assert(next_root->root_ != Node::Nil());
+      root.SetIntentionAddress(intention_pos, *root_offset);
+    }
 
     lk.lock();
-
     NotifyTransaction(intention.token(), intention_pos, true);
-
-    // TODO: filling in csn during after image replay races with whatever the
-    // current root is which copies of nodes are being made during intention
-    // replay.
-    NodePtr root(next_root->root_, this);
-
-    // TODO: this may be Nil... in which case the asserts below are wrong
-    assert(next_root->root_ != Node::Nil());
-    // TODO: watch out for scenarios in which the delta is empty and we are now
-    // referencing a root node i the after image that is unchanged, yet we treat
-    // here like it is coming from a new intention. we shouldn't ever encounter
-    // this in the current implementation cause we bail on empty transactions
-    // but in general we need be careful and check for different conditions.
-    root.SetIntentionAddress(i_info.first, root_offset);
-    root_intention_ = i_info.first;
-
     root_.replace(root);
+    root_intention_ = intention_pos;
+    last_intention_processed = intention_pos;
 
-    last_intention_processed = i_info.first;
-
-    // TODO: uncached_roots is a better name, and we don't need to have multiple
-    // queus, so get rid of the shared pointer.
-    unwritten_roots_.emplace_back(i_info.first, std::move(next_root));
+    unwritten_roots_.emplace_back(intention_pos, std::move(next_root));
     unwritten_roots_cond_.notify_one();
   }
 }

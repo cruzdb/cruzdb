@@ -48,19 +48,17 @@ void PersistentTree::infect_after_image(SharedNodeRef node, uint64_t intention, 
   field_index++;
 }
 
-int PersistentTree::infect_self_pointers(uint64_t intention)
+boost::optional<int> PersistentTree::infect_self_pointers(uint64_t intention)
 {
-  //assert(committed_);
+  if (root_ == nullptr) {
+    root_ = Node::Copy(src_root_.ref_notrace(), db_, rid_);
+    return boost::none;
+  }
+
+  assert(root_ == Node::Nil() ||
+      root_->rid() == rid_);
 
   int field_index = 0;
-  assert(root_ != nullptr);
-  if (root_ == Node::Nil()) {
-    // TODO... not sure exactly what to do here. it seems like a special case
-    // that we should handle expclitly.
-    assert(0);
-  } else
-    assert(root_->rid() == rid_);
-
   infect_after_image(root_, intention, field_index);
 
   assert(field_index > 0);
@@ -215,7 +213,7 @@ SharedNodeRef PersistentTree::insert_recursive(std::deque<SharedNodeRef>& path,
   if (node->rid() == rid_)
     copy = node;
   else {
-    copy = Node::Copy(node, db_, rid_, max_intention_resolvable_);
+    copy = Node::Copy(node, db_, rid_);
     fresh_nodes_.push_back(copy);
   }
 
@@ -263,7 +261,7 @@ void PersistentTree::insert_balance(SharedNodeRef& parent, SharedNodeRef& nn,
   NodePtr& uncle = child_b(path.front());
   if (uncle.ref(trace_)->red()) {
     if (uncle.ref(trace_)->rid() != rid_) {
-      auto n = Node::Copy(uncle.ref(trace_), db_, rid_, max_intention_resolvable_);
+      auto n = Node::Copy(uncle.ref(trace_), db_, rid_);
       fresh_nodes_.push_back(n);
       uncle.set_ref(n);
     }
@@ -302,7 +300,7 @@ SharedNodeRef PersistentTree::delete_recursive(std::deque<SharedNodeRef>& path,
     if (node->rid() == rid_)
       copy = node;
     else {
-      copy = Node::Copy(node, db_, rid_, max_intention_resolvable_);
+      copy = Node::Copy(node, db_, rid_);
       fresh_nodes_.push_back(copy);
     }
     path.push_back(copy);
@@ -326,7 +324,7 @@ SharedNodeRef PersistentTree::delete_recursive(std::deque<SharedNodeRef>& path,
   if (node->rid() == rid_)
     copy = node;
   else {
-    copy = Node::Copy(node, db_, rid_, max_intention_resolvable_);
+    copy = Node::Copy(node, db_, rid_);
     fresh_nodes_.push_back(copy);
   }
 
@@ -359,7 +357,7 @@ SharedNodeRef PersistentTree::build_min_path(SharedNodeRef node, std::deque<Shar
   while (node->left.ref(trace_) != Node::Nil()) {
     assert(node->left.ref(trace_) != nullptr);
     if (node->left.ref(trace_)->rid() != rid_) {
-      auto n = Node::Copy(node->left.ref(trace_), db_, rid_, max_intention_resolvable_);
+      auto n = Node::Copy(node->left.ref(trace_), db_, rid_);
       fresh_nodes_.push_back(n);
       node->left.set_ref(n);
     }
@@ -378,7 +376,7 @@ void PersistentTree::mirror_remove_balance(SharedNodeRef& extra_black, SharedNod
 
   if (brother->red()) {
     if (brother->rid() != rid_) {
-      auto n = Node::Copy(brother, db_, rid_, max_intention_resolvable_);
+      auto n = Node::Copy(brother, db_, rid_);
       fresh_nodes_.push_back(n);
       child_b(parent).set_ref(n);
     } else
@@ -399,7 +397,7 @@ void PersistentTree::mirror_remove_balance(SharedNodeRef& extra_black, SharedNod
 
   if (!brother->left.ref(trace_)->red() && !brother->right.ref(trace_)->red()) {
     if (brother->rid() != rid_) {
-      auto n = Node::Copy(brother, db_, rid_, max_intention_resolvable_);
+      auto n = Node::Copy(brother, db_, rid_);
       fresh_nodes_.push_back(n);
       child_b(parent).set_ref(n);
     } else
@@ -412,7 +410,7 @@ void PersistentTree::mirror_remove_balance(SharedNodeRef& extra_black, SharedNod
   } else {
     if (!child_b(brother).ref(trace_)->red()) {
       if (brother->rid() != rid_) {
-        auto n = Node::Copy(brother, db_, rid_, max_intention_resolvable_);
+        auto n = Node::Copy(brother, db_, rid_);
         fresh_nodes_.push_back(n);
         child_b(parent).set_ref(n);
       } else
@@ -420,7 +418,7 @@ void PersistentTree::mirror_remove_balance(SharedNodeRef& extra_black, SharedNod
       brother = child_b(parent).ref(trace_);
 
       if (child_a(brother).ref(trace_)->rid() != rid_) {
-        auto n = Node::Copy(child_a(brother).ref(trace_), db_, rid_, max_intention_resolvable_);
+        auto n = Node::Copy(child_a(brother).ref(trace_), db_, rid_);
         fresh_nodes_.push_back(n);
         child_a(brother).set_ref(n);
       }
@@ -429,7 +427,7 @@ void PersistentTree::mirror_remove_balance(SharedNodeRef& extra_black, SharedNod
     }
 
     if (brother->rid() != rid_) {
-      auto n = Node::Copy(brother, db_, rid_, max_intention_resolvable_);
+      auto n = Node::Copy(brother, db_, rid_);
       fresh_nodes_.push_back(n);
       child_b(parent).set_ref(n);
     } else
@@ -437,7 +435,7 @@ void PersistentTree::mirror_remove_balance(SharedNodeRef& extra_black, SharedNod
     brother = child_b(parent).ref(trace_);
 
     if (child_b(brother).ref(trace_)->rid() != rid_) {
-      auto n = Node::Copy(child_b(brother).ref(trace_), db_, rid_, max_intention_resolvable_);
+      auto n = Node::Copy(child_b(brother).ref(trace_), db_, rid_);
       fresh_nodes_.push_back(n);
       child_b(brother).set_ref(n);
     }
@@ -474,7 +472,7 @@ void PersistentTree::balance_delete(SharedNodeRef extra_black,
   if (extra_black->rid() == rid_)
     new_node = extra_black;
   else {
-    new_node = Node::Copy(extra_black, db_, rid_, max_intention_resolvable_);
+    new_node = Node::Copy(extra_black, db_, rid_);
     fresh_nodes_.push_back(new_node);
   }
   transplant(parent, extra_black, new_node, root);
@@ -609,7 +607,7 @@ void PersistentTree::Delete(const zlog::Slice& key)
     assert(transplanted != nullptr);
     auto temp = removed;
     if (removed->right.ref(trace_)->rid() != rid_) {
-      auto n = Node::Copy(removed->right.ref(trace_), db_, rid_, max_intention_resolvable_);
+      auto n = Node::Copy(removed->right.ref(trace_), db_, rid_);
       fresh_nodes_.push_back(n);
       removed->right.set_ref(n);
     }

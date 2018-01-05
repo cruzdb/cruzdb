@@ -23,10 +23,15 @@
 
 namespace cruzdb {
 
+struct RestorePoint {
+  uint64_t replay_start_pos;
+  uint64_t after_image_pos;
+  cruzdb_proto::AfterImage after_image;
+};
 
 class DBImpl : public DB {
  public:
-  explicit DBImpl(zlog::Log *log);
+  DBImpl(zlog::Log *log, const RestorePoint& point);
   ~DBImpl();
 
   // TODO: return unique ptr?
@@ -48,7 +53,10 @@ class DBImpl : public DB {
 
   int Get(const zlog::Slice& key, std::string *value) override;
 
-  int RestoreFromLog();
+  static int FindRestorePoint(zlog::Log *log, RestorePoint& point,
+      uint64_t& latest_intention);
+  void WaitOnIntention(uint64_t pos);
+  void NotifyIntention(uint64_t pos);
 
  private:
   friend class PersistentTree; // TODO: get rid of this! its only for updatelru
@@ -69,10 +77,6 @@ class DBImpl : public DB {
  public:
   bool CompleteTransaction(TransactionImpl *txn);
   void AbortTransaction(TransactionImpl *txn);
-
-  void start_reader() {
-    log_reader_ = std::thread(&DBImpl::LogReader, this);
-  }
 
   uint64_t IntentionToAfterImage(uint64_t intention_pos) {
     return cache_.IntentionToAfterImage(intention_pos);
@@ -106,11 +110,8 @@ class DBImpl : public DB {
   NodeCache cache_;
   bool stop_;
 
-  // transaction handling
+  // intention/transaction processing
  private:
-  // handles a transaction intention by making a commit/abort decision, and
-  // producing a new last-committed-state for the database. after images are
-  // queued for handling by the transaction writer.
   void TransactionProcessor();
   bool ProcessConcurrentIntention(const cruzdb_proto::Intention& intention);
   void NotifyTransaction(int64_t token, uint64_t intention_pos, bool committed);
@@ -127,6 +128,7 @@ class DBImpl : public DB {
 
   // process the log in order. dispatch entries to handlers.
   void LogReader();
+  std::map<uint64_t, std::pair<std::condition_variable*, bool*>> waiting_on_log_entry_;
 
   // fifo queue of transaction intentions read from the log. these are processed
   // in order by the transaction processor.
@@ -142,8 +144,7 @@ class DBImpl : public DB {
   std::unordered_map<uint64_t, TransactionWaiter*> pending_txns_;
 
   uint64_t log_reader_pos;
-  bool reader_initialized = false;
-  int64_t last_intention_processed = -1;
+  uint64_t last_intention_processed;
 
   int64_t in_flight_txn_rid_;
   std::atomic<uint64_t> txn_token;
@@ -173,15 +174,6 @@ class DBImpl : public DB {
   std::list<std::pair<uint64_t, cruzdb_proto::AfterImage>> pending_after_images_;
   std::condition_variable pending_after_images_cond_;
 
-  // after image tree for last committed transaction. this may be a node that
-  // has a fully specified phsyical address in which case if it has a node
-  // reference it will point into the cache. otherwise, its node reference will
-  // be at one of the roots in the uncached_roots_ set.
-  //
-  // TODO: there is only a basic check for these conditions in NodePtr, but its
-  // a lot of overhead. we need to completely revamp this infrastructure to
-  // handle all the cases we've encountered since development began and resulted
-  // in a bit of a mess.
   NodePtr root_;
   int64_t root_intention_;
 

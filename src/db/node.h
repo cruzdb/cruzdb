@@ -189,8 +189,7 @@ class Node {
     return node;
   }
 
-  static SharedNodeRef Copy(SharedNodeRef src, DBImpl *db, uint64_t rid,
-      int64_t max_intention_resolvable) {
+  static SharedNodeRef Copy(SharedNodeRef src, DBImpl *db, uint64_t rid) {
     if (src == Nil())
       return Nil();
 
