@@ -23,23 +23,34 @@
 
 namespace cruzdb {
 
-struct RestorePoint {
-  uint64_t replay_start_pos;
-  uint64_t after_image_pos;
-  cruzdb_proto::AfterImage after_image;
-};
-
 class DBImpl : public DB {
  public:
+  struct RestorePoint {
+    uint64_t replay_start_pos;
+    uint64_t after_image_pos;
+    cruzdb_proto::AfterImage after_image;
+  };
+
+  // find the latest consistent state in the log that can be used to restore a
+  // database instance. typically the returned restore point is used to create a
+  // new DBImpl instance, and then WaitOnIntention(latest_intention) is called
+  // to wait until the database has rolled forward.
+  static int FindRestorePoint(zlog::Log *log, RestorePoint& point,
+      uint64_t& latest_intention);
+
+  // TODO: other constructors?
   DBImpl(zlog::Log *log, const RestorePoint& point);
   ~DBImpl();
 
-  // TODO: return unique ptr?
+ public:
+  void WaitOnIntention(uint64_t pos);
+
+  // client interface
+ public:
   Transaction *BeginTransaction() override;
 
   Snapshot *GetSnapshot() override {
     std::lock_guard<std::mutex> l(lock_);
-    //std::cout << "get snapshot: " << root_.csn() << std::endl;
     return new Snapshot(this, root_);
   }
 
@@ -53,10 +64,6 @@ class DBImpl : public DB {
 
   int Get(const zlog::Slice& key, std::string *value) override;
 
-  static int FindRestorePoint(zlog::Log *log, RestorePoint& point,
-      uint64_t& latest_intention);
-  void WaitOnIntention(uint64_t pos);
-  void NotifyIntention(uint64_t pos);
 
  private:
   friend class PersistentTree; // TODO: get rid of this! its only for updatelru
@@ -66,6 +73,8 @@ class DBImpl : public DB {
 
   int _validate_rb_tree(SharedNodeRef root);
   void validate_rb_tree(NodePtr root);
+
+  void NotifyIntention(uint64_t pos);
 
  public:
 
