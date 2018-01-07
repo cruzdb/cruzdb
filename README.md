@@ -7,8 +7,10 @@ A little background:
 
 * Key-Value Store: https://nwat.io/blog/2016/08/02/introduction-to-the-zlog-transaction-key-value-store/
 
+## Build Notes
+
 ```
-ZLOG_DIR=/zlog/install/path cmake .
+cmake -DZLOG_INSTALL_DIR=/../ .
 make
 ```
 
