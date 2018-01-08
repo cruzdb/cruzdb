@@ -17,11 +17,13 @@ class DBImpl;
  */
 class TransactionImpl : public Transaction {
  public:
-  TransactionImpl(DBImpl *db, NodePtr root, int64_t root_intention, int64_t rid) :
+  TransactionImpl(DBImpl *db, NodePtr root, int64_t root_intention, int64_t rid,
+      uint64_t token) :
     db_(db),
     tree_(db, root, rid),
     committed_(false),
-    aborted_(false)
+    aborted_(false),
+    token_(token)
   {
     assert(tree_.rid() < 0);
     intention_.set_snapshot_intention(root_intention);
@@ -47,12 +49,17 @@ class TransactionImpl : public Transaction {
     return intention_;
   }
 
+  uint64_t Token() const {
+    return token_;
+  }
+
  private:
   DBImpl *db_;
   PersistentTree tree_;
 
   bool committed_;
   bool aborted_;
+  const uint64_t token_;
 
   cruzdb_proto::Intention intention_;
 };

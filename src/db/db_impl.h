@@ -92,19 +92,6 @@ class DBImpl : public DB {
   }
 
  private:
-  struct TransactionWaiter {
-    TransactionWaiter() :
-      pos(-1),
-      committed(false),
-      complete(false)
-    {}
-
-    int64_t pos;
-    bool committed;
-    bool complete;
-    std::condition_variable cond;
-  };
-
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
       boost::optional<NodeAddress>& address) {
     return cache_.fetch(trace, address);
@@ -144,19 +131,38 @@ class DBImpl : public DB {
   std::list<std::pair<uint64_t, cruzdb_proto::Intention>> pending_intentions_;
   std::condition_variable pending_intentions_cond_;
 
-  // the set of transactions, initiated by this database instance, indexed by
-  // their log position that are waiting on a commit/abort decision. note that
-  // other nodes in a system may submit transactions to the log, so when
-  // processing transaction intentions, it isn't required that the transaction
-  // be found in this data structure.
-  uint64_t max_pending_txn_pos_ = 0;
-  std::unordered_map<uint64_t, TransactionWaiter*> pending_txns_;
+ private:
+  struct TransactionWaiter {
+    TransactionWaiter() :
+      complete(false),
+      pos(boost::none)
+    {}
 
+    bool complete;
+    bool committed;
+    boost::optional<uint64_t> pos;
+    std::condition_variable cond;
+  };
+
+  struct TransactionRendezvous {
+    TransactionRendezvous(TransactionWaiter *w) :
+      waiters{w}
+    {}
+
+    std::list<TransactionWaiter*> waiters;
+    std::unordered_map<uint64_t, bool> results;
+  };
+
+  std::unordered_map<uint64_t, TransactionRendezvous> txn_waiters_;
+
+  std::mt19937_64 txn_token_engine_;
+  std::uniform_int_distribution<uint64_t> txn_token_dist_;
+
+ private:
   uint64_t log_reader_pos;
   uint64_t last_intention_processed;
 
   int64_t in_flight_txn_rid_;
-  std::atomic<uint64_t> txn_token;
 
   // the set of after image roots produced by committed transactions, but which
   // do not yet have a known serialization location in the log. they remain
