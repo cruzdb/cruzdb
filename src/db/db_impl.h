@@ -131,32 +131,69 @@ class DBImpl : public DB {
   std::list<std::pair<uint64_t, cruzdb_proto::Intention>> pending_intentions_;
   std::condition_variable pending_intentions_cond_;
 
+  // waiting on txn commit/abort decision
  private:
-  struct TransactionWaiter {
-    TransactionWaiter() :
-      complete(false),
-      pos(boost::none)
-    {}
+  class TransactionFinder {
+   private:
+    struct Waiter {
+      Waiter() :
+        complete(false),
+        pos(boost::none)
+      {}
 
-    bool complete;
-    bool committed;
-    boost::optional<uint64_t> pos;
-    std::condition_variable cond;
+      bool complete;
+      bool committed;
+      boost::optional<uint64_t> pos;
+      std::condition_variable cond;
+    };
+
+    struct Rendezvous {
+      Rendezvous(Waiter *w) :
+        waiters{w}
+      {}
+
+      std::list<Waiter*> waiters;
+      std::unordered_map<uint64_t, bool> results;
+    };
+
+   public:
+    class WaiterHandle {
+      Waiter waiter;
+      std::list<Waiter*>::iterator waiter_it;
+      std::unordered_map<uint64_t, Rendezvous>::iterator token_it;
+      friend class TransactionFinder;
+    };
+
+    TransactionFinder() {
+      std::random_device seeder;
+      txn_token_engine_ = std::mt19937_64(seeder());
+      txn_token_dist_ = std::uniform_int_distribution<uint64_t>(
+          std::numeric_limits<uint64_t>::min(),
+          std::numeric_limits<uint64_t>::max());
+    }
+
+    uint64_t Token() {
+      std::lock_guard<std::mutex> lk(lock_);
+      return txn_token_dist_(txn_token_engine_);
+    }
+
+    // register token waiter before appending intention to log
+    void AddTokenWaiter(WaiterHandle& waiter, uint64_t token);
+
+    // wait on the intention to be processed
+    bool WaitOnTransaction(WaiterHandle& waiter, uint64_t intention_pos);
+
+    // the transaction processor notifies the commit/abort decision
+    void Notify(int64_t token, uint64_t intention_pos, bool committed);
+
+   private:
+    std::mutex lock_;
+    std::unordered_map<uint64_t, Rendezvous> token_waiters_;
+    std::mt19937_64 txn_token_engine_;
+    std::uniform_int_distribution<uint64_t> txn_token_dist_;
   };
 
-  struct TransactionRendezvous {
-    TransactionRendezvous(TransactionWaiter *w) :
-      waiters{w}
-    {}
-
-    std::list<TransactionWaiter*> waiters;
-    std::unordered_map<uint64_t, bool> results;
-  };
-
-  std::unordered_map<uint64_t, TransactionRendezvous> txn_waiters_;
-
-  std::mt19937_64 txn_token_engine_;
-  std::uniform_int_distribution<uint64_t> txn_token_dist_;
+  TransactionFinder txn_finder_;
 
  private:
   uint64_t log_reader_pos;

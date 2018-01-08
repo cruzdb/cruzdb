@@ -12,12 +12,6 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   in_flight_txn_rid_(-1),
   root_(Node::Nil(), this)
 {
-  std::random_device seeder;
-  txn_token_engine_ = std::mt19937_64(seeder());
-  txn_token_dist_ = std::uniform_int_distribution<uint64_t>(
-      std::numeric_limits<uint64_t>::min(),
-      std::numeric_limits<uint64_t>::max());
-
   auto root = cache_.CacheAfterImage(point.after_image, point.after_image_pos);
   root_.replace(root);
 
@@ -204,7 +198,7 @@ Transaction *DBImpl::BeginTransaction()
       root_,
       root_intention_,
       in_flight_txn_rid_--,
-      txn_token_dist_(txn_token_engine_));
+      txn_finder_.Token());
 }
 
 void DBImpl::WaitOnIntention(uint64_t pos)
@@ -377,35 +371,7 @@ void DBImpl::NotifyTransaction(int64_t token, uint64_t intention_pos,
     bool committed)
 {
   NotifyIntention(intention_pos);
-
-  // if a token is not found, then a different instance of the database produced
-  // the transaction. in this case there are no waiters to notify.
-  auto it = txn_waiters_.find(token);
-  if (it == txn_waiters_.end())
-    return;
-
-  // at least one transaction is waiting under this token
-  auto& tx = it->second;
-  assert(!tx.waiters.empty());
-
-  // fast path: first waiter is for this intention position
-  auto fw = tx.waiters.front();
-  if (fw->pos && fw->pos == intention_pos) {
-    tx.waiters.pop_front();
-    fw->complete = true;
-    fw->committed = committed;
-    fw->cond.notify_one();
-  } else {
-    // slow path. waiter didn't set the intention position before the
-    // intention was processed, or wasn't first in line. record the result,
-    // and let the waiters know they need to look for themselves. intentions
-    // without waiters under this token should be periodically purged.
-    auto ret = tx.results.emplace(intention_pos, committed);
-    assert(ret.second);
-    std::for_each(tx.waiters.begin(), tx.waiters.end(), [](auto w) {
-      w->cond.notify_one();
-    });
-  }
+  txn_finder_.Notify(token, intention_pos, committed);
 }
 
 void DBImpl::ReplayIntention(PersistentTree *tree,
@@ -768,7 +734,7 @@ void DBImpl::AbortTransaction(TransactionImpl *txn)
 
 bool DBImpl::CompleteTransaction(TransactionImpl *txn)
 {
-  auto token = txn->Token();
+  const auto token = txn->Token();
 
   // transaction intention -> binary blob
   std::string blob;
@@ -783,36 +749,54 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
     entry.release_intention();
   }
 
-  TransactionWaiter waiter;
-
-  std::unique_lock<std::mutex> lk(lock_);
-
-  // register this waiter under the given token
-  auto tw_ret = txn_waiters_.emplace(token, &waiter);
-  if (!tw_ret.second) {
-    assert(tw_ret.first->first == token);
-    tw_ret.first->second.waiters.emplace_back(&waiter);
-  }
-
-  // iterator pointing at waiter
-  auto tw_it = tw_ret.first->second.waiters.end();
-  tw_it--;
-
-  lk.unlock();
+  TransactionFinder::WaiterHandle waiter;
+  txn_finder_.AddTokenWaiter(waiter, token);
 
   // append intention to log
   uint64_t pos;
   int ret = log_->Append(blob, &pos);
   assert(ret == 0);
 
-  lk.lock();
+  bool committed = txn_finder_.WaitOnTransaction(waiter, pos);
+
+  return committed;
+}
+
+void DBImpl::TransactionFinder::AddTokenWaiter(
+    WaiterHandle& whandle, uint64_t token)
+{
+  std::lock_guard<std::mutex> lk(lock_);
+
+  auto& waiter = whandle.waiter;
+
+  // register this waiter under the given token
+  auto ret = token_waiters_.emplace(token, &waiter);
+  if (!ret.second) {
+    assert(ret.first->first == token);
+    ret.first->second.waiters.emplace_back(&waiter);
+  }
+
+  // for quickly removing token entry
+  whandle.token_it = ret.first;
+
+  // for quickly removing waiter from rendezvous list
+  whandle.waiter_it = ret.first->second.waiters.end();
+  whandle.waiter_it--;
+}
+
+bool DBImpl::TransactionFinder::WaitOnTransaction(
+    WaiterHandle& whandle, uint64_t intention_pos)
+{
+  std::unique_lock<std::mutex> lk(lock_);
+
+  auto& waiter = whandle.waiter;
 
   // prepare to wait for the intention to be processed. we'll use the token to
   // rendezvous with the transaction processor. first enable fast path in which
   // the transaction processor finds the correct waiter, as the first waiter,
   // registered under this token.
   assert(!waiter.pos);
-  waiter.pos = pos;
+  waiter.pos = intention_pos;
 
   bool committed;
   while (true) {
@@ -826,11 +810,11 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
     // transaction processor woke up all waiters on this token because it
     // processed an intention and couldn't find a waiter with the target
     // intention position. this could also be a spurious wake-up.
-    auto& results = tw_ret.first->second.results;
-    auto it = results.find(pos);
+    auto& results = whandle.token_it->second.results;
+    auto it = results.find(intention_pos);
     if (it != results.end()) {
       committed = it->second;
-      tw_ret.first->second.waiters.erase(tw_it);
+      whandle.token_it->second.waiters.erase(whandle.waiter_it);
       results.erase(it);
       break;
     }
@@ -839,14 +823,47 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   }
 
   // erase token entry if there are no associations
-  if (tw_ret.first->second.waiters.empty() &&
-      tw_ret.first->second.results.empty()) {
-    txn_waiters_.erase(tw_ret.first);
+  if (whandle.token_it->second.waiters.empty() &&
+      whandle.token_it->second.results.empty()) {
+    token_waiters_.erase(whandle.token_it);
   }
 
-  lk.unlock();
-
   return committed;
+}
+
+void DBImpl::TransactionFinder::Notify(int64_t token,
+    uint64_t intention_pos, bool committed)
+{
+  std::lock_guard<std::mutex> lk(lock_);
+
+  // if a token is not found, then a different instance of the database produced
+  // the transaction. in this case there are no waiters to notify.
+  auto it = token_waiters_.find(token);
+  if (it == token_waiters_.end())
+    return;
+
+  // at least one transaction is waiting under this token
+  auto& tx = it->second;
+  assert(!tx.waiters.empty());
+
+  // fast path: first waiter is for this intention position
+  auto fw = tx.waiters.front();
+  if (fw->pos && fw->pos == intention_pos) {
+    tx.waiters.pop_front();
+    fw->complete = true;
+    fw->committed = committed;
+    fw->cond.notify_one();
+  } else {
+    // slow path. waiter didn't set the intention position before the
+    // intention was processed, or wasn't first in line. record the result,
+    // and let the waiters know they need to look for themselves. intentions
+    // without waiters under this token should be periodically purged.
+    auto ret = tx.results.emplace(intention_pos, committed);
+    assert(ret.second);
+    std::for_each(tx.waiters.begin(), tx.waiters.end(), [](auto w) {
+      w->cond.notify_one();
+    });
+  }
 }
 
 }
