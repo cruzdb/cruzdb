@@ -121,10 +121,3 @@ void Java_org_cruzdb_Transaction_commit(JNIEnv *env, jobject jtxn,
   auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
   txn->Commit();
 }
-
-void Java_org_cruzdb_Transaction_abort(JNIEnv *env, jobject jtxn,
-    jlong jtxnHandle)
-{
-  auto *txn = reinterpret_cast<cruzdb::Transaction*>(jtxnHandle);
-  txn->Abort();
-}

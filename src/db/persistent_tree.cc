@@ -492,9 +492,6 @@ void PersistentTree::balance_delete(SharedNodeRef extra_black,
 
 void PersistentTree::Put(const zlog::Slice& key, const zlog::Slice& value)
 {
-  //assert(!committed_);
-  //assert(!aborted_);
-
   TraceApplier ta(this);
 
   /*
@@ -545,9 +542,6 @@ void PersistentTree::Put(const zlog::Slice& key, const zlog::Slice& value)
 
 int PersistentTree::Get(const zlog::Slice& key, std::string* val)
 {
-  //assert(!committed_);
-  //assert(!aborted_);
-
   TraceApplier ta(this);
 
   auto cur = root_ == nullptr ? src_root_.ref(trace_) : root_;
@@ -566,9 +560,6 @@ int PersistentTree::Get(const zlog::Slice& key, std::string* val)
 
 void PersistentTree::Delete(const zlog::Slice& key)
 {
-  //assert(!committed_);
-  //assert(!aborted_);
-
   TraceApplier ta(this);
 
   std::deque<SharedNodeRef> path;

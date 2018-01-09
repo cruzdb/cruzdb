@@ -85,7 +85,6 @@ class DBImpl : public DB {
 
  public:
   bool CompleteTransaction(TransactionImpl *txn);
-  void AbortTransaction(TransactionImpl *txn);
 
   uint64_t IntentionToAfterImage(uint64_t intention_pos) {
     return cache_.IntentionToAfterImage(intention_pos);

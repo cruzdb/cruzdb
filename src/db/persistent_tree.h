@@ -53,7 +53,7 @@ class PersistentTree {
   void Delete(const zlog::Slice& key);
   int Get(const zlog::Slice& key, std::string *value);
 
-  bool EmptyDelta() {
+  bool ReadOnly() const {
     return root_ == nullptr;
   }
 

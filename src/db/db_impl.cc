@@ -721,17 +721,6 @@ void DBImpl::TransactionFinisher()
 {
 }
 
-// TODO: this may not be necessary any more. for instance, from the db's
-// perspective, there is an extremely narrow window in which a transaction could
-// be aborted, and those are all after txn commit has been requested. so abort
-// should be able to be a strictly transaction side operation.
-void DBImpl::AbortTransaction(TransactionImpl *txn)
-{
-  assert(0);
-  //assert(!txn->Committed());
-  //assert(!txn->Completed());
-}
-
 bool DBImpl::CompleteTransaction(TransactionImpl *txn)
 {
   const auto token = txn->Token();
