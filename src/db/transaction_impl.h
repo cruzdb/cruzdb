@@ -27,15 +27,10 @@ class TransactionImpl : public Transaction {
     return intention_;
   }
 
-  uint64_t Token() const {
-    return token_;
-  }
-
  private:
   DBImpl *db_;
   PersistentTree tree_;
   Intention intention_;
-  const uint64_t token_;
   bool committed_;
 };
 

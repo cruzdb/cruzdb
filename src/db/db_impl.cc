@@ -719,9 +719,9 @@ void DBImpl::TransactionFinisher()
 
 bool DBImpl::CompleteTransaction(TransactionImpl *txn)
 {
-  const auto token = txn->Token();
-
-  auto blob = txn->GetIntention().Serialize(token);
+  auto& intention = txn->GetIntention();
+  const auto token = intention.Token();
+  const auto blob = intention.Serialize();
 
   TransactionFinder::WaiterHandle waiter;
   txn_finder_.AddTokenWaiter(waiter, token);

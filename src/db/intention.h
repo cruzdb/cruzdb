@@ -3,13 +3,17 @@
 
 class Intention {
  public:
-  Intention(int64_t snapshot) {
+  Intention(uint64_t snapshot, uint64_t token) {
     intention_.set_snapshot(snapshot);
+    intention_.set_token(token);
+    assert(intention_.IsInitialized());
   }
 
   Intention(const cruzdb_proto::Intention& intention) :
     intention_(intention)
-  {}
+  {
+    assert(intention_.IsInitialized());
+  }
 
   void Get(const zlog::Slice& key) {
     auto op = intention_.add_ops();
@@ -38,8 +42,7 @@ class Intention {
     return intention_.token();
   }
 
-  std::string Serialize(uint64_t token) {
-    intention_.set_token(token);
+  std::string Serialize() {
     cruzdb_proto::LogEntry entry;
     entry.set_allocated_intention(&intention_);
     assert(entry.IsInitialized());

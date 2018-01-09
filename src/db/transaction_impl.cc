@@ -7,8 +7,7 @@ TransactionImpl::TransactionImpl(DBImpl *db, NodePtr root,
     uint64_t snapshot, int64_t rid, uint64_t token) :
   db_(db),
   tree_(db, root, rid),
-  intention_(snapshot),
-  token_(token),
+  intention_(snapshot, token),
   committed_(false)
 {
   assert(tree_.rid() < 0);
