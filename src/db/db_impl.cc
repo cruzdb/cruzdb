@@ -91,7 +91,7 @@ int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
            point.replay_start_pos = pos + 1;
            point.after_image_pos = it->second.first;
            point.after_image = it->second.second;
-           assert((int64_t)it->first == it->second.second.intention());
+           assert(it->first == it->second.second.intention());
            return 0;
          }
        }
@@ -611,7 +611,7 @@ void DBImpl::TransactionWriter()
 
     // set during serialization, provided when the intention was processed to
     // produce this after image.
-    uint64_t intention_pos = after_image.intention();
+    auto intention_pos = after_image.intention();
     assert(intention_pos == root_info.first);
 
     std::string blob;
