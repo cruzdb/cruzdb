@@ -166,7 +166,7 @@ class DBImpl : public DB {
           std::numeric_limits<uint64_t>::max());
     }
 
-    uint64_t Token() {
+    uint64_t NewToken() {
       std::lock_guard<std::mutex> lk(lock_);
       return txn_token_dist_(txn_token_engine_);
     }

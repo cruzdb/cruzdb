@@ -195,7 +195,7 @@ Transaction *DBImpl::BeginTransaction()
       root_,
       root_snapshot_,
       in_flight_txn_rid_--,
-      txn_finder_.Token());
+      txn_finder_.NewToken());
 }
 
 void DBImpl::WaitOnIntention(uint64_t pos)
