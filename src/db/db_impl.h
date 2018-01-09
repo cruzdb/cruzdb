@@ -116,11 +116,6 @@ class DBImpl : public DB {
   // by the transaction processor when committing an intention from the log.
   void TransactionWriter();
 
-  // handle transaction after images. it applies log position updates to pending
-  // after images, writes completed after images to the log, and folds completed
-  // images into the node cache.
-  void TransactionFinisher();
-
   // process the log in order. dispatch entries to handlers.
   void LogReader();
   std::map<uint64_t, std::pair<std::condition_variable*, bool*>> waiting_on_log_entry_;
@@ -239,7 +234,6 @@ class DBImpl : public DB {
   // variables.
   std::thread txn_writer_;
   std::thread txn_processor_;
-  std::thread txn_finisher_;
   std::thread log_reader_;
 };
 

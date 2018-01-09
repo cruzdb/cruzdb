@@ -20,7 +20,6 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
 
   txn_writer_ = std::thread(&DBImpl::TransactionWriter, this);
   txn_processor_ = std::thread(&DBImpl::TransactionProcessor, this);
-  txn_finisher_ = std::thread(&DBImpl::TransactionFinisher, this);
   log_reader_ = std::thread(&DBImpl::LogReader, this);
 }
 
@@ -36,7 +35,6 @@ DBImpl::~DBImpl()
   pending_after_images_cond_.notify_one();
 
   log_reader_.join();
-  txn_finisher_.join();
   txn_processor_.join();
   txn_writer_.join();
   cache_.Stop();
@@ -711,10 +709,6 @@ void DBImpl::TransactionWriter()
       break;
     }
   }
-}
-
-void DBImpl::TransactionFinisher()
-{
 }
 
 bool DBImpl::CompleteTransaction(TransactionImpl *txn)
