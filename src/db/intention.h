@@ -11,20 +11,6 @@ class Intention {
     intention_(intention)
   {}
 
-  std::string Serialize(uint64_t token) {
-    intention_.set_token(token);
-    cruzdb_proto::LogEntry entry;
-    entry.set_allocated_intention(&intention_);
-    assert(entry.IsInitialized());
-
-    std::string blob;
-    assert(entry.SerializeToString(&blob));
-    // cannot use entry after release...
-    entry.release_intention();
-
-    return blob;
-  }
-
   void Get(const zlog::Slice& key) {
     auto op = intention_.add_ops();
     op->set_op(cruzdb_proto::TransactionOp::GET);
@@ -50,6 +36,20 @@ class Intention {
 
   uint64_t Token() const {
     return intention_.token();
+  }
+
+  std::string Serialize(uint64_t token) {
+    intention_.set_token(token);
+    cruzdb_proto::LogEntry entry;
+    entry.set_allocated_intention(&intention_);
+    assert(entry.IsInitialized());
+
+    std::string blob;
+    assert(entry.SerializeToString(&blob));
+    // cannot use entry after release...
+    entry.release_intention();
+
+    return blob;
   }
 
   auto begin() const {
