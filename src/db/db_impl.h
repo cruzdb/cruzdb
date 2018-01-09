@@ -108,9 +108,9 @@ class DBImpl : public DB {
   // intention/transaction processing
  private:
   void TransactionProcessor();
-  bool ProcessConcurrentIntention(const cruzdb_proto::Intention& intention);
+  bool ProcessConcurrentIntention(const Intention& intention);
   void NotifyTransaction(int64_t token, uint64_t intention_pos, bool committed);
-  void ReplayIntention(PersistentTree *tree, const cruzdb_proto::Intention& intention);
+  void ReplayIntention(PersistentTree *tree, const Intention& intention);
 
   // schedules the serialization and writing of in-memory after images produced
   // by the transaction processor when committing an intention from the log.
@@ -127,7 +127,7 @@ class DBImpl : public DB {
 
   // fifo queue of transaction intentions read from the log. these are processed
   // in order by the transaction processor.
-  std::list<std::pair<uint64_t, cruzdb_proto::Intention>> pending_intentions_;
+  std::list<std::pair<uint64_t, Intention>> pending_intentions_;
   std::condition_variable pending_intentions_cond_;
 
   // waiting on txn commit/abort decision

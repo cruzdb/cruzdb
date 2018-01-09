@@ -53,7 +53,7 @@ message TransactionOp {
 // were read, and/or operations through other vectors such as the iterator
 // interface.
 message Intention {
-    required int64 snapshot_intention = 1;
+    required int64 snapshot = 1;
     repeated TransactionOp ops = 2;
     required int64 token = 3;
 }

@@ -1,6 +1,5 @@
 #include "db_impl.h"
 #include <unistd.h>
-#include <sstream>
 #include <chrono>
 
 namespace cruzdb {
@@ -309,9 +308,9 @@ void DBImpl::LogReader()
   }
 }
 
-bool DBImpl::ProcessConcurrentIntention(const cruzdb_proto::Intention& intention)
+bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
 {
-  auto snapshot = intention.snapshot_intention();
+  auto snapshot = intention.Snapshot();
   assert(snapshot < root_intention_); // concurrent property
 
   auto it = intention_map_.find(snapshot);
@@ -320,8 +319,7 @@ bool DBImpl::ProcessConcurrentIntention(const cruzdb_proto::Intention& intention
 
   // set of keys read or written by the intention
   std::set<std::string> intention_keys;
-  for (int i = 0; i < intention.ops_size(); i++) {
-    auto& op = intention.ops(i);
+  for (auto op : intention) {
     intention_keys.insert(op.key());
   }
 
@@ -374,11 +372,9 @@ void DBImpl::NotifyTransaction(int64_t token, uint64_t intention_pos,
   txn_finder_.Notify(token, intention_pos, committed);
 }
 
-void DBImpl::ReplayIntention(PersistentTree *tree,
-    const cruzdb_proto::Intention& intention)
+void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
 {
-  for (int idx = 0; idx < intention.ops_size(); idx++) {
-    auto& op = intention.ops(idx);
+  for (auto op : intention) {
     switch (op.op()) {
       case cruzdb_proto::TransactionOp::GET:
         assert(!op.has_val());
@@ -434,7 +430,7 @@ void DBImpl::TransactionProcessor()
     lk.unlock();
 
     assert(root_intention_ < (int64_t)intention_pos);
-    auto serial = root_intention_ == intention.snapshot_intention();
+    auto serial = root_intention_ == intention.Snapshot();
 
     // check for transaction conflicts
     bool abort;
@@ -447,7 +443,7 @@ void DBImpl::TransactionProcessor()
     // if aborting, notify waiters, then move on to next txn
     if (abort) {
       lk.lock();
-      NotifyTransaction(intention.token(), intention_pos, false);
+      NotifyTransaction(intention.Token(), intention_pos, false);
       last_intention_processed = intention_pos;
       continue;
     }
@@ -472,7 +468,7 @@ void DBImpl::TransactionProcessor()
     }
 
     lk.lock();
-    NotifyTransaction(intention.token(), intention_pos, true);
+    NotifyTransaction(intention.Token(), intention_pos, true);
     root_.replace(root);
     root_intention_ = intention_pos;
     last_intention_processed = intention_pos;
@@ -725,18 +721,7 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
 {
   const auto token = txn->Token();
 
-  // transaction intention -> binary blob
-  std::string blob;
-  {
-    cruzdb_proto::LogEntry entry;
-    auto& intent = txn->GetIntention();
-    intent.set_token(token);
-    entry.set_allocated_intention(&intent);
-    assert(entry.IsInitialized());
-    assert(entry.SerializeToString(&blob));
-    // cannot use entry after release...
-    entry.release_intention();
-  }
+  auto blob = txn->GetIntention().Serialize(token);
 
   TransactionFinder::WaiterHandle waiter;
   txn_finder_.AddTokenWaiter(waiter, token);

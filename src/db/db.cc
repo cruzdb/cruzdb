@@ -23,7 +23,7 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
     // write intention to position 0
     {
       cruzdb_proto::Intention intention;
-      intention.set_snapshot_intention(-1);
+      intention.set_snapshot(-1);
       intention.set_token(0);
 
       cruzdb_proto::LogEntry entry;

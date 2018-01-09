@@ -1,8 +1,8 @@
 #pragma once
 #include "cruzdb/transaction.h"
-#include "db/cruzdb.pb.h"
 #include "db/node.h"
 #include "db/persistent_tree.h"
+#include "db/intention.h"
 
 namespace cruzdb {
 
@@ -23,7 +23,7 @@ class TransactionImpl : public Transaction {
   virtual bool Commit() override;
 
  public:
-  cruzdb_proto::Intention& GetIntention() {
+  Intention& GetIntention() {
     return intention_;
   }
 
@@ -34,9 +34,9 @@ class TransactionImpl : public Transaction {
  private:
   DBImpl *db_;
   PersistentTree tree_;
+  Intention intention_;
   const uint64_t token_;
   bool committed_;
-  cruzdb_proto::Intention intention_;
 };
 
 }
