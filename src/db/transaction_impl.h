@@ -10,7 +10,7 @@ class DBImpl;
 
 class TransactionImpl : public Transaction {
  public:
-  TransactionImpl(DBImpl *db, NodePtr root, int64_t root_intention,
+  TransactionImpl(DBImpl *db, NodePtr root, uint64_t snapshot,
       int64_t rid, uint64_t token);
 
   ~TransactionImpl();

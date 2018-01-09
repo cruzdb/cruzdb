@@ -44,11 +44,11 @@ class Intention {
     op->set_key(key.ToString());
   }
 
-  int64_t Snapshot() const {
+  uint64_t Snapshot() const {
     return intention_.snapshot();
   }
 
-  int64_t Token() const {
+  uint64_t Token() const {
     return intention_.token();
   }
 

@@ -226,7 +226,7 @@ class DBImpl : public DB {
   std::condition_variable pending_after_images_cond_;
 
   NodePtr root_;
-  int64_t root_intention_;
+  uint64_t root_snapshot_;
 
   std::set<uint64_t> intention_map_;
 

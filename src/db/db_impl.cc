@@ -14,9 +14,9 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   auto root = cache_.CacheAfterImage(point.after_image, point.after_image_pos);
   root_.replace(root);
 
-  root_intention_ = point.after_image.intention();
+  root_snapshot_ = point.after_image.intention();
   log_reader_pos = point.replay_start_pos;
-  last_intention_processed = root_intention_;
+  last_intention_processed = root_snapshot_;
 
   txn_writer_ = std::thread(&DBImpl::TransactionWriter, this);
   txn_processor_ = std::thread(&DBImpl::TransactionProcessor, this);
@@ -195,7 +195,7 @@ Transaction *DBImpl::BeginTransaction()
   std::unique_lock<std::mutex> lk(lock_);
   return new TransactionImpl(this,
       root_,
-      root_intention_,
+      root_snapshot_,
       in_flight_txn_rid_--,
       txn_finder_.Token());
 }
@@ -311,7 +311,7 @@ void DBImpl::LogReader()
 bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
 {
   auto snapshot = intention.Snapshot();
-  assert(snapshot < root_intention_); // concurrent property
+  assert(snapshot < root_snapshot_); // concurrent property
 
   auto it = intention_map_.find(snapshot);
   assert(it != intention_map_.end());
@@ -356,7 +356,7 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
       }
     }
 
-    if (intent_pos == (uint64_t)root_intention_)
+    if (intent_pos == root_snapshot_)
       break;
 
     it++;
@@ -429,8 +429,8 @@ void DBImpl::TransactionProcessor()
 
     lk.unlock();
 
-    assert(root_intention_ < (int64_t)intention_pos);
-    auto serial = root_intention_ == intention.Snapshot();
+    assert(root_snapshot_ < intention_pos);
+    auto serial = root_snapshot_ == intention.Snapshot();
 
     // check for transaction conflicts
     bool abort;
@@ -470,7 +470,7 @@ void DBImpl::TransactionProcessor()
     lk.lock();
     NotifyTransaction(intention.Token(), intention_pos, true);
     root_.replace(root);
-    root_intention_ = intention_pos;
+    root_snapshot_ = intention_pos;
     last_intention_processed = intention_pos;
 
     unwritten_roots_.emplace_back(intention_pos, std::move(next_root));

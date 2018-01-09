@@ -4,10 +4,10 @@ namespace cruzdb {
 
   // root intention unsigned?
 TransactionImpl::TransactionImpl(DBImpl *db, NodePtr root,
-    int64_t root_intention, int64_t rid, uint64_t token) :
+    uint64_t snapshot, int64_t rid, uint64_t token) :
   db_(db),
   tree_(db, root, rid),
-  intention_(root_intention),
+  intention_(snapshot),
   token_(token),
   committed_(false)
 {
