@@ -283,7 +283,7 @@ void DBImpl::LogReader()
       case cruzdb_proto::LogEntry::kIntention:
         {
           std::lock_guard<std::mutex> lk(lock_);
-          pending_intentions_.emplace_back(log_reader_pos, entry.intention());
+          pending_intentions_.emplace_back(entry.intention(), log_reader_pos);
         }
         pending_intentions_cond_.notify_one();
         break;
@@ -415,11 +415,10 @@ void DBImpl::TransactionProcessor()
       return;
 
     // the intentions are processed in strict fifo order
-    const auto i_info = pending_intentions_.front();
+    const auto intention = pending_intentions_.front();
     pending_intentions_.pop_front();
 
-    const auto intention_pos = i_info.first;
-    const auto& intention = i_info.second;
+    const auto intention_pos = intention.Position();
 
     // the next root starts with the current root as its snapshot
     auto next_root = std::make_unique<PersistentTree>(this, root_,

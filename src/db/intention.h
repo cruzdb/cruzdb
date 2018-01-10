@@ -66,3 +66,19 @@ class Intention {
  private:
   cruzdb_proto::Intention intention_;
 };
+
+// An intention with an associated log position
+class SafeIntention : public Intention {
+ public:
+  SafeIntention(const cruzdb_proto::Intention& intention, uint64_t pos) :
+    Intention(intention),
+    pos_(pos)
+  {}
+
+  inline uint64_t Position() const {
+    return pos_;
+  }
+
+ private:
+  uint64_t pos_;
+};

@@ -122,7 +122,7 @@ class DBImpl : public DB {
 
   // fifo queue of transaction intentions read from the log. these are processed
   // in order by the transaction processor.
-  std::list<std::pair<uint64_t, Intention>> pending_intentions_;
+  std::list<SafeIntention> pending_intentions_;
   std::condition_variable pending_intentions_cond_;
 
   // waiting on txn commit/abort decision
