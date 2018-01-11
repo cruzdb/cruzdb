@@ -17,7 +17,7 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   root_.replace(root);
 
   root_snapshot_ = point.after_image.intention();
-  last_intention_processed = root_snapshot_;
+  last_intention_processed_ = root_snapshot_;
 
   txn_writer_ = std::thread(&DBImpl::TransactionWriter, this);
   txn_processor_ = std::thread(&DBImpl::TransactionProcessor, this);
@@ -229,7 +229,7 @@ void DBImpl::WaitOnIntention(uint64_t pos)
   bool done = false;
   std::condition_variable cond;
   std::unique_lock<std::mutex> lk(lock_);
-  if (pos <= last_intention_processed) {
+  if (pos <= last_intention_processed_) {
     return;
   }
   waiting_on_log_entry_.emplace(pos, std::make_pair(&cond, &done));
@@ -364,7 +364,8 @@ void DBImpl::TransactionProcessor()
     if (abort) {
       std::lock_guard<std::mutex> lk(lock_);
       NotifyTransaction(intention->Token(), intention_pos, false);
-      last_intention_processed = intention_pos;
+      assert(last_intention_processed_ < intention_pos);
+      last_intention_processed_ = intention_pos;
       continue;
     }
 
@@ -384,6 +385,7 @@ void DBImpl::TransactionProcessor()
       auto it = finished_txns_.find(intention_pos);
       if (it != finished_txns_.end()) {
         next_root = std::move(it->second);
+        finished_txns_.erase(it);
         lk.unlock();
         assert(next_root);
         need_replay = false;
@@ -418,7 +420,9 @@ void DBImpl::TransactionProcessor()
     NotifyTransaction(intention->Token(), intention_pos, true);
     root_.replace(root);
     root_snapshot_ = intention_pos;
-    last_intention_processed = intention_pos;
+
+    assert(last_intention_processed_ < intention_pos);
+    last_intention_processed_ = intention_pos;
 
     unwritten_roots_.emplace_back(intention_pos, std::move(next_root));
     unwritten_roots_cond_.notify_one();
@@ -676,24 +680,33 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   int ret = log_->Append(blob, &pos);
   assert(ret == 0);
 
-  lock_.lock();
-  // after move, prevent use of tree reference in the txn
-  auto res = finished_txns_.emplace(pos, std::move(txn->Tree()));
-  lock_.unlock();
-  assert(res.second);
+  {
+    std::vector<std::unique_ptr<PersistentTree>> unused_trees;
+
+    std::unique_lock<std::mutex> lk(lock_);
+
+    // register tree for re-use by transaction processor
+    auto res = finished_txns_.emplace(pos, std::move(txn->Tree()));
+    assert(res.second);
+
+    // remove old trees. this task is also a candidate for periodically
+    // performing in a maintenance thread. for instance, the current strategy
+    // relies on there being a stream of transactions to continually remove
+    // older transaction state. the after images in principle could be large, so
+    // it might also be useful to force some of them to be freed with a higher
+    // priority.
+    auto it = finished_txns_.begin();
+    while (it != finished_txns_.end()) {
+      if (it->first <= last_intention_processed_) {
+        unused_trees.emplace_back(std::move(it->second));
+        it = finished_txns_.erase(it);
+      } else {
+        it++;
+      }
+    }
+  }
 
   bool committed = txn_finder_.WaitOnTransaction(waiter, pos);
-
-  // the txn processor may have moved the tree out of the index, so make sure to
-  // not use it. the removal here also depends on the txn processor having had
-  // its chance, and WaitOnTransaction is used to ensure that. it would be
-  // better to make this more robust: use the latest intention position as a
-  // bounds for clearing entries from the index, and amatorize the cost of that
-  // GC when a transaction inserts.
-  lock_.lock();
-  auto tree = std::move(res.first->second);
-  finished_txns_.erase(res.first);
-  lock_.unlock();
 
   return committed;
 }

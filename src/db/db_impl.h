@@ -157,7 +157,7 @@ class DBImpl : public DB {
   TransactionFinder txn_finder_;
   std::map<uint64_t, std::pair<std::condition_variable*, bool*>> waiting_on_log_entry_;
   EntryService::IntentionQueue *intention_queue_;
-  uint64_t last_intention_processed;
+  uint64_t last_intention_processed_;
   int64_t in_flight_txn_rid_;
   std::set<uint64_t> intention_map_;
 
