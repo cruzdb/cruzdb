@@ -23,13 +23,19 @@ if (CMAKE_BUILD_TYPE STREQUAL "Coverage")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -fprofile-arcs -ftest-coverage")
 endif()
 
-# require c++14
-include(CheckCXXCompilerFlag)
-CHECK_CXX_COMPILER_FLAG("-std=c++14" COMPILER_SUPPORTS_CXX14)
-if (COMPILER_SUPPORTS_CXX14)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+# require c++17
+if(CMAKE_VERSION VERSION_LESS "3.8")
+  include(CheckCXXCompilerFlag)
+  CHECK_CXX_COMPILER_FLAG("-std=c++17" COMPILER_SUPPORTS_CXX17)
+  if(NOT COMPILER_SUPPORTS_CXX17)
+    message(FATAL_ERROR
+      "The compiler ${CMAKE_CXX_COMPILER} has no C++17 support.")
+  endif()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 else()
-  message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++14 support.")
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_EXTENSIONS OFF)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
 # check dependencies
