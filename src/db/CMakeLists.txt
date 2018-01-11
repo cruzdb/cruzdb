@@ -10,6 +10,7 @@ add_library(cruzdb SHARED
   node.cc
   persistent_tree.cc
   db.cc
+  entry_service.cc
   ${PROTO_SRCS})
 target_include_directories(cruzdb
   PUBLIC ${PROTOBUF_INCLUDE_DIR})

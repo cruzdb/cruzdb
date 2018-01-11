@@ -1,6 +1,8 @@
 #pragma once
 #include "db/cruzdb.pb.h"
 
+namespace cruzdb {
+
 class Intention {
  public:
   Intention(uint64_t snapshot, uint64_t token) {
@@ -82,3 +84,5 @@ class SafeIntention : public Intention {
  private:
   uint64_t pos_;
 };
+
+}

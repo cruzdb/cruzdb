@@ -20,6 +20,7 @@
 #include "snapshot.h"
 #include "transaction_impl.h"
 #include "cruzdb/db.h"
+#include "db/entry_service.h"
 
 namespace cruzdb {
 
@@ -120,11 +121,6 @@ class DBImpl : public DB {
   void LogReader();
   std::map<uint64_t, std::pair<std::condition_variable*, bool*>> waiting_on_log_entry_;
 
-  // fifo queue of transaction intentions read from the log. these are processed
-  // in order by the transaction processor.
-  std::list<SafeIntention> pending_intentions_;
-  std::condition_variable pending_intentions_cond_;
-
   // waiting on txn commit/abort decision
  private:
   class TransactionFinder {
@@ -190,7 +186,10 @@ class DBImpl : public DB {
   TransactionFinder txn_finder_;
 
  private:
-  uint64_t log_reader_pos;
+  EntryService entry_service_;
+  EntryService::IntentionQueue *intention_queue_;
+
+ private:
   uint64_t last_intention_processed;
 
   int64_t in_flight_txn_rid_;
@@ -217,9 +216,6 @@ class DBImpl : public DB {
   std::list<std::pair<uint64_t, std::unique_ptr<PersistentTree>>> unwritten_roots_;
   std::condition_variable unwritten_roots_cond_;
 
-  std::list<std::pair<uint64_t, cruzdb_proto::AfterImage>> pending_after_images_;
-  std::condition_variable pending_after_images_cond_;
-
   NodePtr root_;
   uint64_t root_snapshot_;
 
@@ -234,7 +230,6 @@ class DBImpl : public DB {
   // variables.
   std::thread txn_writer_;
   std::thread txn_processor_;
-  std::thread log_reader_;
 };
 
 }

@@ -8,6 +8,8 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   log_(log),
   cache_(this),
   stop_(false),
+  entry_service_(log, point.replay_start_pos, &lock_),
+  intention_queue_(entry_service_.NewIntentionQueue(point.replay_start_pos)),
   in_flight_txn_rid_(-1),
   root_(Node::Nil(), this)
 {
@@ -15,12 +17,10 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   root_.replace(root);
 
   root_snapshot_ = point.after_image.intention();
-  log_reader_pos = point.replay_start_pos;
   last_intention_processed = root_snapshot_;
 
   txn_writer_ = std::thread(&DBImpl::TransactionWriter, this);
   txn_processor_ = std::thread(&DBImpl::TransactionProcessor, this);
-  log_reader_ = std::thread(&DBImpl::LogReader, this);
 }
 
 DBImpl::~DBImpl()
@@ -30,11 +30,10 @@ DBImpl::~DBImpl()
     stop_ = true;
   }
 
-  pending_intentions_cond_.notify_one();
-  unwritten_roots_cond_.notify_one();
-  pending_after_images_cond_.notify_one();
+  entry_service_.Stop();
 
-  log_reader_.join();
+  unwritten_roots_cond_.notify_one();
+
   txn_processor_.join();
   txn_writer_.join();
   cache_.Stop();
@@ -222,90 +221,6 @@ void DBImpl::NotifyIntention(uint64_t pos)
   waiting_on_log_entry_.erase(first, last);
 }
 
-// TODO:
-//  - where does the log reader start from, and how does it progress. currently
-//  we are going to start from 0 because we are only considering new databases.
-//  we progress by two methods: locally we know when a new intention or after
-//  image has been appened, but other nodes may also append, so we need to make
-//  sure to be checking with the sequencer. currently we are single node, so we
-//  are only dealing with the simple case...
-//
-//  create new log reader service
-void DBImpl::LogReader()
-{
-  while (true) {
-    {
-      std::lock_guard<std::mutex> l(lock_);
-      if (stop_)
-        return;
-    }
-
-    std::string data;
-
-    // need to fill log positions. this is because it is important that any
-    // after image that is currently the first occurence following its
-    // intention, remains that way.
-    int ret = log_->Read(log_reader_pos, &data);
-    if (ret) {
-      // TODO: be smart about reading. we shouldn't wait one second, and we
-      // should sometimes fill holes. the current infrastructure won't generate
-      // holes in testing, so this will work for now.
-      if (ret == -ENOENT) {
-        /*
-         * TODO: currently we can run into a soft lockup where the log reader is
-         * spinning on a position that hasn't been written. that's weird, since
-         * we aren't observing any failed clients or sequencer or anything, so
-         * every position should be written.
-         *
-         * what might be happening.. is that there is a hole, but the entity
-         * assigned to fill that hole is waiting on something a bit further
-         * ahead in the log, so no progress is being made...
-         *
-         * lets get a confirmation about the state here so we can record this
-         * case. it would be an interesting case.
-         *
-         * do timeout waits so we can see with print statements...
-         */
-        continue;
-      }
-      assert(0);
-    }
-
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
-
-    // TODO: look into using Arena allocation in protobufs, or moving to
-    // flatbuffers. we basically want to avoid all the copying here, by doing
-    // something like pushing a pointer onto these lists, or using move
-    // semantics.
-    switch (entry.msg_case()) {
-      case cruzdb_proto::LogEntry::kIntention:
-        {
-          std::lock_guard<std::mutex> lk(lock_);
-          pending_intentions_.emplace_back(entry.intention(), log_reader_pos);
-        }
-        pending_intentions_cond_.notify_one();
-        break;
-
-      case cruzdb_proto::LogEntry::kAfterImage:
-        {
-          std::lock_guard<std::mutex> lk(lock_);
-          pending_after_images_.emplace_back(log_reader_pos, entry.after_image());
-        }
-        pending_after_images_cond_.notify_one();
-        break;
-
-      case cruzdb_proto::LogEntry::MSG_NOT_SET:
-      default:
-        assert(0);
-        exit(1);
-    }
-
-    log_reader_pos++;
-  }
-}
-
 bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
 {
   auto snapshot = intention.Snapshot();
@@ -398,49 +313,36 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
 void DBImpl::TransactionProcessor()
 {
   while (true) {
-    std::unique_lock<std::mutex> lk(lock_);
-
-    if (!pending_intentions_cond_.wait_for(lk, std::chrono::seconds(10),
-          [&] { return !pending_intentions_.empty() || stop_; })) {
-      std::cout << "tp: no pending intentions for 1 second" << std::endl;
-#if 0
-      for (auto& txn : pending_txns_) {
-        std::cout << "tp: pending txn at pos " << txn.first << std::endl;
-      }
-#endif
-      continue;
+    const auto intention = intention_queue_->Wait();
+    if (!intention) {
+      break;
     }
+    const auto intention_pos = intention->Position();
 
+    // probably dont need this lock...
+    std::unique_lock<std::mutex> lk(lock_);
     if (stop_)
-      return;
-
-    // the intentions are processed in strict fifo order
-    const auto intention = pending_intentions_.front();
-    pending_intentions_.pop_front();
-
-    const auto intention_pos = intention.Position();
-
+      break;
     // the next root starts with the current root as its snapshot
     auto next_root = std::make_unique<PersistentTree>(this, root_,
         static_cast<int64_t>(intention_pos));
-
     lk.unlock();
 
     assert(root_snapshot_ < intention_pos);
-    auto serial = root_snapshot_ == intention.Snapshot();
+    auto serial = root_snapshot_ == intention->Snapshot();
 
     // check for transaction conflicts
     bool abort;
     if (serial) {
       abort = false;
     } else {
-      abort = ProcessConcurrentIntention(intention);
+      abort = ProcessConcurrentIntention(*intention);
     }
 
     // if aborting, notify waiters, then move on to next txn
     if (abort) {
       lk.lock();
-      NotifyTransaction(intention.Token(), intention_pos, false);
+      NotifyTransaction(intention->Token(), intention_pos, false);
       last_intention_processed = intention_pos;
       continue;
     }
@@ -453,7 +355,7 @@ void DBImpl::TransactionProcessor()
       assert(ret.second);
     }
 
-    ReplayIntention(next_root.get(), intention);
+    ReplayIntention(next_root.get(), *intention);
 
     auto root_offset = next_root->infect_self_pointers(intention_pos);
 
@@ -465,7 +367,7 @@ void DBImpl::TransactionProcessor()
     }
 
     lk.lock();
-    NotifyTransaction(intention.Token(), intention_pos, true);
+    NotifyTransaction(intention->Token(), intention_pos, true);
     root_.replace(root);
     root_snapshot_ = intention_pos;
     last_intention_processed = intention_pos;
@@ -473,6 +375,8 @@ void DBImpl::TransactionProcessor()
     unwritten_roots_.emplace_back(intention_pos, std::move(next_root));
     unwritten_roots_cond_.notify_one();
   }
+
+  std::cerr << "transaction processor exiting" << std::endl;
 }
 
 // PROBLEM: in order to write a after image we need to fill in the physical
@@ -635,8 +539,8 @@ void DBImpl::TransactionWriter()
     lk.lock();
     while (true) {
 
-      pending_after_images_cond_.wait(lk, [&] {
-        return !pending_after_images_.empty() || stop_;
+      entry_service_.pending_after_images_cond_.wait(lk, [&] {
+        return !entry_service_.pending_after_images_.empty() || stop_;
       });
 
       if (stop_)
@@ -655,7 +559,7 @@ void DBImpl::TransactionWriter()
       // after first glance it seems totally fine. we are driven by transactions
       // that finish (above), and then just wait on the corresponding after
       // image to arrive...
-      for (auto ai : pending_after_images_) {
+      for (auto ai : entry_service_.pending_after_images_) {
         auto key = ai.second.intention();
         if (after_images_cache.find(key) == after_images_cache.end()) {
           //std::cout << "caching after image for intention @ " << key << std::endl;
@@ -664,7 +568,7 @@ void DBImpl::TransactionWriter()
           after_images_cache[key] = ai;
         }
       }
-      pending_after_images_.clear();
+      entry_service_.pending_after_images_.clear();
 
       // are we still waiting on the after image from above...?
       auto it = after_images_cache.find(intention_pos);
