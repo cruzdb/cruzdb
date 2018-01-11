@@ -130,7 +130,7 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
   }
 
   std::string snapshot;
-  int ret = db_->log_->Read(csn, &snapshot);
+  int ret = log_->Read(csn, &snapshot);
   assert(ret == 0);
 
   cruzdb_proto::LogEntry log_entry;

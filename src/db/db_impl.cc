@@ -6,7 +6,7 @@ namespace cruzdb {
 
 DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   log_(log),
-  cache_(this),
+  cache_(log, this),
   stop_(false),
   entry_service_(log, point.replay_start_pos, &lock_),
   intention_queue_(entry_service_.NewIntentionQueue(point.replay_start_pos)),
@@ -37,6 +37,22 @@ DBImpl::~DBImpl()
   txn_processor_.join();
   txn_writer_.join();
   cache_.Stop();
+}
+
+Snapshot *DBImpl::GetSnapshot()
+{
+  std::lock_guard<std::mutex> l(lock_);
+  return new Snapshot(this, root_);
+}
+
+void DBImpl::ReleaseSnapshot(Snapshot *snapshot)
+{
+  delete snapshot;
+}
+
+Iterator *DBImpl::NewIterator(Snapshot *snapshot)
+{
+  return new IteratorImpl(snapshot);
 }
 
 int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
@@ -122,16 +138,9 @@ int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
   exit(1);
 }
 
-/*
- *
- */
-int DBImpl::_validate_rb_tree(const SharedNodeRef root)
+int DBImpl::Validate(const SharedNodeRef root)
 {
   assert(root != nullptr);
-
-  assert(root->read_only());
-  if (!root->read_only())
-    return 0;
 
   if (root == Node::Nil())
     return 1;
@@ -145,8 +154,8 @@ int DBImpl::_validate_rb_tree(const SharedNodeRef root)
   if (root->red() && (ln->red() || rn->red()))
     return 0;
 
-  int lh = _validate_rb_tree(ln);
-  int rh = _validate_rb_tree(rn);
+  int lh = Validate(ln);
+  int rh = Validate(rn);
 
   if ((ln != Node::Nil() && ln->key().compare(root->key()) >= 0) ||
       (rn != Node::Nil() && rn->key().compare(root->key()) <= 0))
@@ -161,9 +170,27 @@ int DBImpl::_validate_rb_tree(const SharedNodeRef root)
   return 0;
 }
 
-void DBImpl::validate_rb_tree(NodePtr root)
+void DBImpl::Validate()
 {
-  assert(_validate_rb_tree(root.ref_notrace()) != 0);
+  auto snapshot = root_;
+  bool valid = Validate(snapshot.ref_notrace()) != 0;
+  assert(valid);
+}
+
+void DBImpl::UpdateLRU(std::vector<NodeAddress>& trace)
+{
+  cache_.UpdateLRU(trace);
+}
+
+uint64_t DBImpl::IntentionToAfterImage(uint64_t intention_pos)
+{
+  return cache_.IntentionToAfterImage(intention_pos);
+}
+
+SharedNodeRef DBImpl::fetch(std::vector<NodeAddress>& trace,
+    boost::optional<NodeAddress>& address)
+{
+  return cache_.fetch(trace, address);
 }
 
 int DBImpl::Get(const zlog::Slice& key, std::string *value)

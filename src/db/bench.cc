@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include "cruzdb/db.h"
 #include "port/stack_trace.h"
+#include "db/db_impl.h"
 
 #if __APPLE__
 static inline uint64_t getns()
@@ -85,7 +86,7 @@ int main(int argc, char **argv)
       double iops = (double)(txn_count * 1000000000ULL) / (double)dur_ns;
       std::cout << "sha1 dev-backend hostname: iops " << iops << std::endl;
       std::cout << "validating tree..." << std::flush;
-      //db->validate();
+      ((cruzdb::DBImpl*)db)->Validate();
       std::cout << " done" << std::endl << std::flush;
       txn_count = 0;
       start_ns = getns();

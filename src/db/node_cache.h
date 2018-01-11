@@ -6,6 +6,7 @@
 #include <thread>
 #include <list>
 #include <condition_variable>
+#include <zlog/log.h>
 #include "node.h"
 #include "db/cruzdb.pb.h"
 
@@ -34,7 +35,8 @@ struct pair_hash {
 
 class NodeCache {
  public:
-  explicit NodeCache(DBImpl *db) :
+  NodeCache(zlog::Log *log, DBImpl *db) :
+    log_(log),
     db_(db),
     used_bytes_(0),
     stop_(false),
@@ -84,6 +86,7 @@ class NodeCache {
   }
 
  private:
+  zlog::Log *log_;
   DBImpl *db_;
   std::mutex lock_;
   std::atomic_size_t used_bytes_;
