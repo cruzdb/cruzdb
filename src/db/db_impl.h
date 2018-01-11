@@ -161,6 +161,10 @@ class DBImpl : public DB {
   int64_t in_flight_txn_rid_;
   std::set<uint64_t> intention_map_;
 
+  // finished transactions indexed by their intention position and used by the
+  // transaction processor to avoid replaying serial intentions.
+  std::unordered_map<uint64_t, std::unique_ptr<PersistentTree>> finished_txns_;
+
   NodePtr root_;
   uint64_t root_snapshot_;
 

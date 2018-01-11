@@ -63,7 +63,8 @@ class PersistentTree {
 
   // serialization and fix-up
  public:
-  boost::optional<int> infect_self_pointers(uint64_t intention);
+  boost::optional<int> infect_self_pointers(uint64_t intention,
+      bool expect_intention_rid);
   void SerializeAfterImage(cruzdb_proto::AfterImage& i,
       uint64_t intention,
       std::vector<SharedNodeRef>& delta);
@@ -132,7 +133,7 @@ class PersistentTree {
 
   // transaction after image
   SharedNodeRef root_;
-  const int64_t rid_;
+  int64_t rid_;
 
   // cache system related. will change in future...
  private:

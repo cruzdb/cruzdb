@@ -27,9 +27,13 @@ class TransactionImpl : public Transaction {
     return intention_;
   }
 
+  std::unique_ptr<PersistentTree> Tree() {
+    return std::move(tree_);
+  }
+
  private:
   DBImpl *db_;
-  PersistentTree tree_;
+  std::unique_ptr<PersistentTree> tree_;
   Intention intention_;
   bool committed_;
 };

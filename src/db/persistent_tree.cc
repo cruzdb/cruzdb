@@ -48,8 +48,50 @@ void PersistentTree::infect_after_image(SharedNodeRef node, uint64_t intention, 
   field_index++;
 }
 
-boost::optional<int> PersistentTree::infect_self_pointers(uint64_t intention)
+boost::optional<int> PersistentTree::infect_self_pointers(uint64_t intention,
+    bool expect_intention_rid)
 {
+  // before infection, the rid of the nodes and this tree are switched over to
+  // the intention value. the effect of this should be the same as if the tree
+  // had originally been initialized with intention as the rid.
+  //
+  // when serial intentions are able to re-use in-memory trees from local
+  // transactions, those trees have a negative rid value. however, normal
+  // intention replay produces trees with an rid equal to the position of the
+  // intention. this normalizes it to make sure that everything is identical.
+  //
+  // is this really necessary? probably not. as it stands, the rid just needs to
+  // be unique in memory. however, when nodes are freed from memory and restored
+  // from the log, they receive an rid equal to their intention. that makes all
+  // but the nodes that are converted from in-memory transactions in the serial
+  // case have unified rids.
+  //
+  // what happens when nodes that are part of the same delta have different
+  // rids? nothing, as long as there is no process that wants to find the nodes
+  // that are part of the same delta, and in the current system, that doesn't
+  // happen except for during serialization, but we keep nodes in memory until
+  // then so there is no risk.
+  //
+  // as it stands, updating the value is a cheap process because have to look at
+  // all the nodes anyway which makes the decision easy. but... it's something
+  // to think about in the future because in the fast path of the transaction
+  // processor, it may be the case that we are eventually looking for ways to
+  // reduce any bit of work.
+  for (auto& n : fresh_nodes_) {
+    if (expect_intention_rid) {
+      assert(n->rid() == (int64_t)intention);
+    } else {
+      assert(n->rid() < 0);
+    }
+    n->set_rid(intention);
+  }
+  if (expect_intention_rid) {
+    assert(rid_ == (int64_t)intention);
+  } else {
+    assert(rid_ < 0);
+  }
+  rid_ = (int64_t)intention;
+
   if (root_ == nullptr) {
     root_ = Node::Copy(src_root_.ref_notrace(), db_, rid_);
     return boost::none;

@@ -340,25 +340,19 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
 void DBImpl::TransactionProcessor()
 {
   while (true) {
+
+    // next intention to process
     const auto intention = intention_queue_->Wait();
     if (!intention) {
       break;
     }
     const auto intention_pos = intention->Position();
 
-    // probably dont need this lock...
-    std::unique_lock<std::mutex> lk(lock_);
-    if (stop_)
-      break;
-    // the next root starts with the current root as its snapshot
-    auto next_root = std::make_unique<PersistentTree>(this, root_,
-        static_cast<int64_t>(intention_pos));
-    lk.unlock();
-
+    // serial intention?
     assert(root_snapshot_ < intention_pos);
     auto serial = root_snapshot_ == intention->Snapshot();
 
-    // check for transaction conflicts
+    // check for conflicts
     bool abort;
     if (serial) {
       abort = false;
@@ -366,9 +360,9 @@ void DBImpl::TransactionProcessor()
       abort = ProcessConcurrentIntention(*intention);
     }
 
-    // if aborting, notify waiters, then move on to next txn
+    // abort: notify waiters before moving on
     if (abort) {
-      lk.lock();
+      std::lock_guard<std::mutex> lk(lock_);
       NotifyTransaction(intention->Token(), intention_pos, false);
       last_intention_processed = intention_pos;
       continue;
@@ -382,9 +376,36 @@ void DBImpl::TransactionProcessor()
       assert(ret.second);
     }
 
-    ReplayIntention(next_root.get(), *intention);
+    bool need_replay;
+    std::unique_ptr<PersistentTree> next_root;
 
-    auto root_offset = next_root->infect_self_pointers(intention_pos);
+    std::unique_lock<std::mutex> lk(lock_);
+    if (serial) {
+      auto it = finished_txns_.find(intention_pos);
+      if (it != finished_txns_.end()) {
+        next_root = std::move(it->second);
+        lk.unlock();
+        assert(next_root);
+        need_replay = false;
+      } else {
+        need_replay = true;
+      }
+    } else {
+      need_replay = true;
+    }
+
+    boost::optional<int> root_offset;
+    if (need_replay) {
+      next_root = std::make_unique<PersistentTree>(this, root_,
+          static_cast<int64_t>(intention_pos));
+      lk.unlock();
+      ReplayIntention(next_root.get(), *intention);
+      root_offset = next_root->infect_self_pointers(intention_pos, true);
+    } else {
+      // this also fixes up the rid. see method for details
+      root_offset = next_root->infect_self_pointers(intention_pos, false);
+    }
+    assert(root_offset);
 
     assert(next_root->root_ != nullptr);
     NodePtr root(next_root->root_, this);
@@ -655,7 +676,24 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   int ret = log_->Append(blob, &pos);
   assert(ret == 0);
 
+  lock_.lock();
+  // after move, prevent use of tree reference in the txn
+  auto res = finished_txns_.emplace(pos, std::move(txn->Tree()));
+  lock_.unlock();
+  assert(res.second);
+
   bool committed = txn_finder_.WaitOnTransaction(waiter, pos);
+
+  // the txn processor may have moved the tree out of the index, so make sure to
+  // not use it. the removal here also depends on the txn processor having had
+  // its chance, and WaitOnTransaction is used to ensure that. it would be
+  // better to make this more robust: use the latest intention position as a
+  // bounds for clearing entries from the index, and amatorize the cost of that
+  // GC when a transaction inserts.
+  lock_.lock();
+  auto tree = std::move(res.first->second);
+  finished_txns_.erase(res.first);
+  lock_.unlock();
 
   return committed;
 }
