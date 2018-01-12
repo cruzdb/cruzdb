@@ -5,14 +5,17 @@ namespace cruzdb {
 
 class Intention {
  public:
-  Intention(uint64_t snapshot, uint64_t token) {
+  Intention(uint64_t snapshot, uint64_t token) :
+    pos_(boost::none)
+  {
     intention_.set_snapshot(snapshot);
     intention_.set_token(token);
     assert(intention_.IsInitialized());
   }
 
-  Intention(const cruzdb_proto::Intention& intention) :
-    intention_(intention)
+  Intention(const cruzdb_proto::Intention& intention, uint64_t pos) :
+    intention_(intention),
+    pos_(pos)
   {
     assert(intention_.IsInitialized());
   }
@@ -51,7 +54,6 @@ class Intention {
 
     std::string blob;
     assert(entry.SerializeToString(&blob));
-    // cannot use entry after release...
     entry.release_intention();
 
     return blob;
@@ -65,24 +67,19 @@ class Intention {
     return intention_.ops().end();
   }
 
- private:
-  cruzdb_proto::Intention intention_;
-};
+  uint64_t Position() const {
+    assert(pos_);
+    return *pos_;
+  }
 
-// An intention with an associated log position
-class SafeIntention : public Intention {
- public:
-  SafeIntention(const cruzdb_proto::Intention& intention, uint64_t pos) :
-    Intention(intention),
-    pos_(pos)
-  {}
-
-  inline uint64_t Position() const {
-    return pos_;
+  void SetPosition(uint64_t pos) {
+    assert(!pos_);
+    pos_ = pos;
   }
 
  private:
-  uint64_t pos_;
+  cruzdb_proto::Intention intention_;
+  boost::optional<uint64_t> pos_;
 };
 
 }

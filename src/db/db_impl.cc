@@ -340,7 +340,6 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
 void DBImpl::TransactionProcessor()
 {
   while (true) {
-
     // next intention to process
     const auto intention = intention_queue_->Wait();
     if (!intention) {
@@ -668,16 +667,15 @@ void DBImpl::TransactionWriter()
 
 bool DBImpl::CompleteTransaction(TransactionImpl *txn)
 {
-  auto& intention = txn->GetIntention();
-  const auto token = intention.Token();
-  const auto blob = intention.Serialize();
-
+  // setup transaction rendezvous under this token
+  const auto token = txn->Token();
   TransactionFinder::WaiterHandle waiter;
   txn_finder_.AddTokenWaiter(waiter, token);
 
-  // append intention to log
+  // appending moves the intention out of the txn
   uint64_t pos;
-  int ret = log_->Append(blob, &pos);
+  auto ret = entry_service_.AppendIntention(
+      std::move(txn->GetIntention()), &pos);
   assert(ret == 0);
 
   {
@@ -685,7 +683,7 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
 
     std::unique_lock<std::mutex> lk(lock_);
 
-    // register tree for re-use by transaction processor
+    // registering moves the tree out of the txn
     auto res = finished_txns_.emplace(pos, std::move(txn->Tree()));
     assert(res.second);
 

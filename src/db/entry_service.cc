@@ -31,6 +31,40 @@ void EntryService::Stop()
   intention_reader_.join();
 }
 
+void EntryCache::Insert(std::unique_ptr<Intention> intention)
+{
+  auto pos = intention->Position();
+  std::lock_guard<std::mutex> lk(lock_);
+  if (intentions_.size() > 10) {
+    intentions_.erase(intentions_.begin());
+  }
+  intentions_.emplace(pos, std::move(intention));
+}
+
+// obvs this is silly to return a copy. the cache should be storing shared
+// pointers or something like this.
+boost::optional<Intention> EntryCache::FindIntention(uint64_t pos)
+{
+  std::lock_guard<std::mutex> lk(lock_);
+  auto it = intentions_.find(pos);
+  if (it != intentions_.end()) {
+    return *(it->second);
+  }
+  return boost::none;
+}
+
+int EntryService::AppendIntention(std::unique_ptr<Intention> intention,
+    uint64_t *pos)
+{
+  const auto blob = intention->Serialize();
+  int ret = log_->Append(blob, pos);
+  if (ret == 0) {
+    intention->SetPosition(*pos);
+    cache_.Insert(std::move(intention));
+  }
+  return ret;
+}
+
 void EntryService::IntentionReader()
 {
   uint64_t pos;
@@ -67,6 +101,23 @@ void EntryService::IntentionReader()
 
     last_min_pos = min_pos;
 
+    // the cache may know that this pos is not an intention, and that additional
+    // slots in the log can be skipped over...
+    auto intention = cache_.FindIntention(pos);
+    if (intention) {
+      lk.lock();
+      for (auto& q : intention_queues_) {
+        if (pos >= q->Position()) {
+          q->Push(*intention);
+        }
+      }
+      lk.unlock();
+
+      pos++;
+      continue;
+    }
+
+    // obvs this should be populating the cache too..
     std::string data;
     int ret = log_->Read(pos, &data);
     if (ret) {
@@ -85,7 +136,7 @@ void EntryService::IntentionReader()
         lk.lock();
         for (auto& q : intention_queues_) {
           if (pos >= q->Position()) {
-            q->Push(SafeIntention(entry.intention(), pos));
+            q->Push(Intention(entry.intention(), pos));
           }
         }
         lk.unlock();
@@ -198,7 +249,7 @@ void EntryService::IntentionQueue::Stop()
   cond_.notify_all();
 }
 
-boost::optional<SafeIntention> EntryService::IntentionQueue::Wait()
+boost::optional<Intention> EntryService::IntentionQueue::Wait()
 {
   std::unique_lock<std::mutex> lk(lock_);
   cond_.wait(lk, [this] { return !q_.empty() || stop_; });
@@ -217,7 +268,7 @@ uint64_t EntryService::IntentionQueue::Position() const
   return pos_;
 }
 
-void EntryService::IntentionQueue::Push(SafeIntention intention)
+void EntryService::IntentionQueue::Push(Intention intention)
 {
   std::lock_guard<std::mutex> lk(lock_);
   assert(pos_ <= intention.Position());

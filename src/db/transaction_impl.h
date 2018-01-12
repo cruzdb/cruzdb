@@ -23,8 +23,12 @@ class TransactionImpl : public Transaction {
   virtual bool Commit() override;
 
  public:
-  Intention& GetIntention() {
-    return intention_;
+  uint64_t Token() const {
+    return token_;
+  }
+
+  std::unique_ptr<Intention> GetIntention() {
+    return std::move(intention_);
   }
 
   std::unique_ptr<PersistentTree> Tree() {
@@ -33,8 +37,9 @@ class TransactionImpl : public Transaction {
 
  private:
   DBImpl *db_;
+  const uint64_t token_;
   std::unique_ptr<PersistentTree> tree_;
-  Intention intention_;
+  std::unique_ptr<Intention> intention_;
   bool committed_;
 };
 
