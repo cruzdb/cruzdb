@@ -60,6 +60,8 @@ matrix:
 # all other job configurations only run ci/script.sh below which will handle
 # dependency installation.
 before_install:
+  - export CC=gcc-7
+  - export CXX=g++-7
   - if [ $TRAVIS_BRANCH == coverity_scan ] && [ ${TRAVIS_JOB_NUMBER##*.} == 1 ]; then \
       ./ci/install-zlog-deps.sh && ./ci/install-zlog.sh && ./install-deps.sh; fi
   - if [ $TRAVIS_BRANCH == coverity_scan ] && [ ${TRAVIS_JOB_NUMBER##*.} != 1 ]; then exit 0; fi
