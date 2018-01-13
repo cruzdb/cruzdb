@@ -62,7 +62,7 @@ function rpms() {
   esac
 
   extra="gcc-c++"
-  if [ -n dts_ver ]; then
+  if [ -n "$dts_ver" ]; then
     extra="devtoolset-7-gcc-c++ devtoolset-7-libatomic-devel"
   fi
 
