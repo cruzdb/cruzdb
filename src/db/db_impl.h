@@ -11,6 +11,7 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <boost/optional.hpp>
 
 #include <zlog/log.h>
 
