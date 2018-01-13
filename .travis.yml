@@ -54,6 +54,8 @@ matrix:
       env: DOCKER_IMAGE=ubuntu:artful
     - os: osx
       env: OSX_BUILD=1
+  allow_failures:
+    - os: osx
 
 # the coverity build runs in the standard travis environment (job config #1
 # from the build matrix) and needs to have the proper dependencies installed.
