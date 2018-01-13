@@ -53,6 +53,7 @@ class Intention {
   std::string Serialize() {
     assert(!pos_);
     cruzdb_proto::LogEntry entry;
+    entry.set_type(cruzdb_proto::LogEntry::INTENTION);
     entry.set_allocated_intention(&intention_);
     assert(entry.IsInitialized());
 

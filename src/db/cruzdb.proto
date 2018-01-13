@@ -59,8 +59,11 @@ message Intention {
 }
 
 message LogEntry {
-    oneof msg {
-        Intention intention = 1;
-        AfterImage after_image = 2;
+    enum EntryType {
+       INTENTION = 0;
+       AFTER_IMAGE = 1;
     }
+  required EntryType type = 1;
+  optional Intention intention = 2;
+  optional AfterImage after_image = 3;
 }

@@ -136,8 +136,8 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
   cruzdb_proto::LogEntry log_entry;
   assert(log_entry.ParseFromString(snapshot));
   assert(log_entry.IsInitialized());
-  assert(log_entry.msg_case() != cruzdb_proto::LogEntry::kIntention);
-  assert(log_entry.msg_case() == cruzdb_proto::LogEntry::kAfterImage);
+  assert(log_entry.type() != cruzdb_proto::LogEntry::INTENTION);
+  assert(log_entry.type() == cruzdb_proto::LogEntry::AFTER_IMAGE);
   auto i = log_entry.after_image();
 
   auto nn = deserialize_node(i, csn, offset);

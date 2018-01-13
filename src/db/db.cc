@@ -27,6 +27,7 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
       intention.set_token(0);
 
       cruzdb_proto::LogEntry entry;
+      entry.set_type(cruzdb_proto::LogEntry::INTENTION);
       entry.set_allocated_intention(&intention);
       assert(entry.IsInitialized());
 
@@ -48,6 +49,7 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
       after_image.set_intention(0);
 
       cruzdb_proto::LogEntry entry;
+      entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
       entry.set_allocated_after_image(&after_image);
       assert(entry.IsInitialized());
 

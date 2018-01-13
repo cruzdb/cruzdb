@@ -131,8 +131,8 @@ void EntryService::IntentionReader()
     assert(entry.ParseFromString(data));
     assert(entry.IsInitialized());
 
-    switch (entry.msg_case()) {
-      case cruzdb_proto::LogEntry::kIntention:
+    switch (entry.type()) {
+      case cruzdb_proto::LogEntry::INTENTION:
         lk.lock();
         for (auto& q : intention_queues_) {
           if (pos >= q->Position()) {
@@ -142,10 +142,9 @@ void EntryService::IntentionReader()
         lk.unlock();
         break;
 
-      case cruzdb_proto::LogEntry::kAfterImage:
+      case cruzdb_proto::LogEntry::AFTER_IMAGE:
         break;
 
-      case cruzdb_proto::LogEntry::MSG_NOT_SET:
       default:
         assert(0);
         exit(1);
@@ -203,11 +202,11 @@ void EntryService::Run()
     // flatbuffers. we basically want to avoid all the copying here, by doing
     // something like pushing a pointer onto these lists, or using move
     // semantics.
-    switch (entry.msg_case()) {
-      case cruzdb_proto::LogEntry::kIntention:
+    switch (entry.type()) {
+      case cruzdb_proto::LogEntry::INTENTION:
         break;
 
-      case cruzdb_proto::LogEntry::kAfterImage:
+      case cruzdb_proto::LogEntry::AFTER_IMAGE:
         {
           std::lock_guard<std::mutex> lk(*db_lock_);
           pending_after_images_.emplace_back(pos_, entry.after_image());
@@ -215,7 +214,6 @@ void EntryService::Run()
         pending_after_images_cond_.notify_one();
         break;
 
-      case cruzdb_proto::LogEntry::MSG_NOT_SET:
       default:
         assert(0);
         exit(1);

@@ -96,8 +96,8 @@ int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
     assert(entry.ParseFromString(data));
     assert(entry.IsInitialized());
 
-    switch (entry.msg_case()) {
-      case cruzdb_proto::LogEntry::kIntention:
+    switch (entry.type()) {
+      case cruzdb_proto::LogEntry::INTENTION:
        {
          if (!set_latest_intention) {
            latest_intention = pos;
@@ -118,7 +118,7 @@ int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
        break;
 
        // find the oldest version of each after image
-      case cruzdb_proto::LogEntry::kAfterImage:
+      case cruzdb_proto::LogEntry::AFTER_IMAGE:
         {
           assert(pos > 0);
           auto ai = entry.after_image();
@@ -280,7 +280,7 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
     cruzdb_proto::LogEntry entry;
     assert(entry.ParseFromString(data));
     assert(entry.IsInitialized());
-    assert(entry.msg_case() == cruzdb_proto::LogEntry::kIntention);
+    assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
 
     // set of keys modified by the intention in the conflict zone
     const auto& other_intention = entry.intention();
@@ -576,6 +576,7 @@ void DBImpl::TransactionWriter()
 
     std::string blob;
     cruzdb_proto::LogEntry entry;
+    entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
     entry.set_allocated_after_image(&after_image);
     assert(entry.IsInitialized());
     assert(entry.SerializeToString(&blob));
