@@ -19,6 +19,7 @@ fi
 
 function debs() {
   $SUDO apt-get update
+  $SUDO apt-key update
   $SUDO env DEBIAN_FRONTEND=noninteractive \
     apt-get install -y cmake libprotobuf-dev \
       protobuf-compiler libboost-system-dev \
