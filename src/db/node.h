@@ -136,13 +136,13 @@ class NodePtr {
 
   void SetIntentionAddress(uint64_t position, uint16_t offset) {
     std::lock_guard<std::mutex> l(lock_);
-    address_.emplace(position, offset, false);
+    address_ = NodeAddress(position, offset, false);
   }
 
   void SetAfterImageAddress(uint64_t position, uint16_t offset) {
     std::lock_guard<std::mutex> l(lock_);
     assert(!address_);
-    address_.emplace(position, offset, true);
+    address_ = NodeAddress(position, offset, true);
   }
 
   void ConvertToAfterImage(uint64_t position) {
@@ -150,7 +150,7 @@ class NodePtr {
     assert(address_);
     assert(!address_->IsAfterImage());
     assert(address_->Position() < position);
-    address_.emplace(position, address_->Offset(), true);
+    address_ = NodeAddress(position, address_->Offset(), true);
   }
 
  private:
