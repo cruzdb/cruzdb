@@ -35,17 +35,13 @@ matrix:
     - os: linux
       env: DOCKER_IMAGE=fedora:24
     - os: linux
-      env: DOCKER_IMAGE=debian:jessie
+      env: DOCKER_IMAGE=debian:stretch
     - os: linux
-      env: DOCKER_IMAGE=ubuntu:trusty
+      env: DOCKER_IMAGE=ubuntu:xenial RUN_COVERAGE=0
     - os: linux
-      env: DOCKER_IMAGE=ubuntu:xenial
+      env: DOCKER_IMAGE=ubuntu:xenial RUN_COVERAGE=1
     - os: linux
-      env: DOCKER_IMAGE=ubuntu:yakkety
-    - os: linux
-      env: DOCKER_IMAGE=ubuntu:zesty RUN_COVERAGE=0
-    - os: linux
-      env: DOCKER_IMAGE=ubuntu:zesty RUN_COVERAGE=1
+      env: DOCKER_IMAGE=ubuntu:artful
     - os: osx
       env: OSX_BUILD=1
 

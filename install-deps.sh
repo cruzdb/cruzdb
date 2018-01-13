@@ -37,6 +37,8 @@ function rpms() {
   $SUDO $yumdnf install -y cmake gcc-c++ boost-devel \
     protobuf-devel protobuf-compiler java-devel lcov \
     libatomic python-virtualenv
+
+  $SUDO $yumdnf install -y devtoolset-7-gcc-c++ || true
 }
 
 source /etc/os-release
