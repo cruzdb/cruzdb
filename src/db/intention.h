@@ -21,12 +21,14 @@ class Intention {
   }
 
   void Get(const zlog::Slice& key) {
+    assert(!pos_);
     auto op = intention_.add_ops();
     op->set_op(cruzdb_proto::TransactionOp::GET);
     op->set_key(key.ToString());
   }
 
   void Put(const zlog::Slice& key, const zlog::Slice& value) {
+    assert(!pos_);
     auto op = intention_.add_ops();
     op->set_op(cruzdb_proto::TransactionOp::PUT);
     op->set_key(key.ToString());
@@ -34,6 +36,7 @@ class Intention {
   }
 
   void Delete(const zlog::Slice& key) {
+    assert(!pos_);
     auto op = intention_.add_ops();
     op->set_op(cruzdb_proto::TransactionOp::DELETE);
     op->set_key(key.ToString());
@@ -48,6 +51,7 @@ class Intention {
   }
 
   std::string Serialize() {
+    assert(!pos_);
     cruzdb_proto::LogEntry entry;
     entry.set_allocated_intention(&intention_);
     assert(entry.IsInitialized());
@@ -60,10 +64,12 @@ class Intention {
   }
 
   auto begin() const {
+    assert(pos_);
     return intention_.ops().begin();
   }
 
   auto end() const {
+    assert(pos_);
     return intention_.ops().end();
   }
 

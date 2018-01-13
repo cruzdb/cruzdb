@@ -21,6 +21,7 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
 
   txn_writer_ = std::thread(&DBImpl::TransactionWriter, this);
   txn_processor_ = std::thread(&DBImpl::TransactionProcessor, this);
+  janitor_thread_ = std::thread(&DBImpl::JanitorEntry, this);
 }
 
 DBImpl::~DBImpl()
@@ -30,9 +31,13 @@ DBImpl::~DBImpl()
     stop_ = true;
   }
 
+  janitor_cond_.notify_one();
+  janitor_thread_.join();
+
   entry_service_.Stop();
 
   unwritten_roots_cond_.notify_one();
+
 
   txn_processor_.join();
   txn_writer_.join();
@@ -378,14 +383,10 @@ void DBImpl::TransactionProcessor()
 
     bool need_replay;
     std::unique_ptr<PersistentTree> next_root;
-
-    std::unique_lock<std::mutex> lk(lock_);
     if (serial) {
-      auto it = finished_txns_.find(intention_pos);
-      if (it != finished_txns_.end()) {
-        next_root = std::move(it->second);
-        finished_txns_.erase(it);
-        lk.unlock();
+      auto tmp = finished_txns_.Find(intention_pos);
+      if (tmp) {
+        next_root = std::move(tmp);
         assert(next_root);
         need_replay = false;
       } else {
@@ -397,6 +398,10 @@ void DBImpl::TransactionProcessor()
 
     boost::optional<int> root_offset;
     if (need_replay) {
+      // really need this lock? it's really only here for the read of root_, but
+      // that shouldn't need a lock since this thread is the only thread that
+      // can write to root_.
+      std::unique_lock<std::mutex> lk(lock_);
       next_root = std::make_unique<PersistentTree>(this, root_,
           static_cast<int64_t>(intention_pos));
       lk.unlock();
@@ -415,7 +420,8 @@ void DBImpl::TransactionProcessor()
       root.SetIntentionAddress(intention_pos, *root_offset);
     }
 
-    lk.lock();
+    std::unique_lock<std::mutex> lk(lock_);
+
     NotifyTransaction(intention->Token(), intention_pos, true);
     root_.replace(root);
     root_snapshot_ = intention_pos;
@@ -672,37 +678,14 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   TransactionFinder::WaiterHandle waiter;
   txn_finder_.AddTokenWaiter(waiter, token);
 
-  // appending moves the intention out of the txn
+  // MOVE txn's intention to the append io service
   uint64_t pos;
   auto ret = entry_service_.AppendIntention(
       std::move(txn->GetIntention()), &pos);
   assert(ret == 0);
 
-  {
-    std::vector<std::unique_ptr<PersistentTree>> unused_trees;
-
-    std::unique_lock<std::mutex> lk(lock_);
-
-    // registering moves the tree out of the txn
-    auto res = finished_txns_.emplace(pos, std::move(txn->Tree()));
-    assert(res.second);
-
-    // remove old trees. this task is also a candidate for periodically
-    // performing in a maintenance thread. for instance, the current strategy
-    // relies on there being a stream of transactions to continually remove
-    // older transaction state. the after images in principle could be large, so
-    // it might also be useful to force some of them to be freed with a higher
-    // priority.
-    auto it = finished_txns_.begin();
-    while (it != finished_txns_.end()) {
-      if (it->first <= last_intention_processed_) {
-        unused_trees.emplace_back(std::move(it->second));
-        it = finished_txns_.erase(it);
-      } else {
-        it++;
-      }
-    }
-  }
+  // MOVE txn's tree into index for txn processor
+  finished_txns_.Insert(pos, std::move(txn->Tree()));
 
   bool committed = txn_finder_.WaitOnTransaction(waiter, pos);
 
@@ -810,6 +793,52 @@ void DBImpl::TransactionFinder::Notify(int64_t token,
     std::for_each(tx.waiters.begin(), tx.waiters.end(), [](auto w) {
       w->cond.notify_one();
     });
+  }
+}
+
+std::unique_ptr<PersistentTree>
+DBImpl::FinishedTransactions::Find(uint64_t ipos)
+{
+  std::lock_guard<std::mutex> lk(lock_);
+  auto it = txns_.find(ipos);
+  if (it != txns_.end()) {
+    return std::move(it->second);
+  }
+  return nullptr;
+}
+
+void DBImpl::FinishedTransactions::Insert(uint64_t ipos,
+    std::unique_ptr<PersistentTree> tree)
+{
+  std::lock_guard<std::mutex> lk(lock_);
+  auto ret = txns_.emplace(ipos, std::move(tree));
+  assert(ret.second);
+}
+
+void DBImpl::FinishedTransactions::Clean(uint64_t last_ipos)
+{
+  std::vector<std::unique_ptr<PersistentTree>> unused_trees;
+  std::lock_guard<std::mutex> lk(lock_);
+  auto it = txns_.begin();
+  while (it != txns_.end()) {
+    if (it->first <= last_ipos) {
+      unused_trees.emplace_back(std::move(it->second));
+      it = txns_.erase(it);
+    } else {
+      it++;
+    }
+  }
+  // unused_trees destructor called after lock is released
+}
+
+void DBImpl::JanitorEntry()
+{
+  while (!stop_) {
+    std::unique_lock<std::mutex> lk(lock_);
+    janitor_cond_.wait_for(lk, std::chrono::seconds(1));
+    lk.unlock();
+
+    finished_txns_.Clean(last_intention_processed_);
   }
 }
 

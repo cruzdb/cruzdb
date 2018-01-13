@@ -161,15 +161,34 @@ class DBImpl : public DB {
   int64_t in_flight_txn_rid_;
   std::set<uint64_t> intention_map_;
 
+ private:
   // finished transactions indexed by their intention position and used by the
   // transaction processor to avoid replaying serial intentions.
-  std::unordered_map<uint64_t, std::unique_ptr<PersistentTree>> finished_txns_;
+  class FinishedTransactions {
+   public:
+    std::unique_ptr<PersistentTree> Find(uint64_t ipos);
+    void Insert(uint64_t ipos, std::unique_ptr<PersistentTree> tree);
+    void Clean(uint64_t last_ipos);
+
+   private:
+    mutable std::mutex lock_;
+    std::unordered_map<uint64_t,
+      std::unique_ptr<PersistentTree>> txns_;
+  };
+
+  FinishedTransactions finished_txns_;
 
   NodePtr root_;
   uint64_t root_snapshot_;
 
   std::thread txn_writer_;
   std::thread txn_processor_;
+
+  // handles various clean-up tasks. useful for absorbing potentially high
+  // latency memory freeing events.
+  void JanitorEntry();
+  std::condition_variable janitor_cond_;
+  std::thread janitor_thread_;
 };
 
 }
