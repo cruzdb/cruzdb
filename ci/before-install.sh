@@ -18,6 +18,7 @@ if test $(id -u) != 0 ; then
 fi
 
 function debs() {
+  $SUDO apt-key update
   $SUDO apt-get update
   $SUDO env DEBIAN_FRONTEND=noninteractive \
     apt-get install -y git
