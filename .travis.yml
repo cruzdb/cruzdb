@@ -30,6 +30,8 @@ addons:
       - g++-7
       - gcc-7
 
+#- os: linux
+#- env: DOCKER_IMAGE=debian:stretch
 matrix:
   include:
     - os: linux
@@ -44,8 +46,6 @@ matrix:
       env: DOCKER_IMAGE=fedora:25
     - os: linux
       env: DOCKER_IMAGE=fedora:24
-    - os: linux
-      env: DOCKER_IMAGE=debian:stretch
     - os: linux
       env: DOCKER_IMAGE=ubuntu:xenial RUN_COVERAGE=0
     - os: linux
