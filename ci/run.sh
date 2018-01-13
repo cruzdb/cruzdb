@@ -14,6 +14,19 @@ DB_DIR=$(mktemp -d)
 trap "rm -rf ${DB_DIR} ${BUILD_DIR} \
   ${DOCS_DIR} ${INSTALL_DIR}" EXIT
 
+source /etc/os-release
+case $ID in
+  centos|fedora)
+    case $(lsb_release -si) in
+      CentOS)
+        MAJOR_VERSION=$(lsb_release -rs | cut -f1 -d.)
+        if test $(lsb_release -si) = CentOS -a $MAJOR_VERSION = 7 ; then
+          source /opt/rh/devtoolset-7/enable
+        fi
+        ;;
+    esac
+esac
+
 # build documentation
 ${ROOT_DIR}/doc/build.sh ${DOCS_DIR}
 test -r ${DOCS_DIR}/output/html/index.html
