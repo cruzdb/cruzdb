@@ -200,8 +200,9 @@ SharedNodeRef DBImpl::fetch(std::vector<NodeAddress>& trace,
 
 int DBImpl::Get(const zlog::Slice& key, std::string *value)
 {
-  auto root = root_;
   std::vector<NodeAddress> trace;
+  auto snap = GetSnapshot();
+  auto root = snap->root;
 
   auto cur = root.ref(trace);
   while (cur != Node::Nil()) {
@@ -221,7 +222,7 @@ int DBImpl::Get(const zlog::Slice& key, std::string *value)
 
 Transaction *DBImpl::BeginTransaction()
 {
-  std::unique_lock<std::mutex> lk(lock_);
+  std::lock_guard<std::mutex> lk(lock_);
   return new TransactionImpl(this,
       root_,
       root_snapshot_,
