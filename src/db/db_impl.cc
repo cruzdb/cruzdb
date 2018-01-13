@@ -422,7 +422,6 @@ void DBImpl::TransactionProcessor()
 
     std::unique_lock<std::mutex> lk(lock_);
 
-    NotifyTransaction(intention->Token(), intention_pos, true);
     root_.replace(root);
     root_snapshot_ = intention_pos;
 
@@ -431,6 +430,8 @@ void DBImpl::TransactionProcessor()
 
     unwritten_roots_.emplace_back(intention_pos, std::move(next_root));
     unwritten_roots_cond_.notify_one();
+
+    NotifyTransaction(intention->Token(), intention_pos, true);
   }
 
   std::cerr << "transaction processor exiting" << std::endl;
