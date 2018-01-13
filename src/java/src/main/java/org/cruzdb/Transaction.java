@@ -49,13 +49,6 @@ public class Transaction extends CruzObject {
     commit(nativeHandle_);
   }
 
-  /**
-   * @throws org.cruzdb.CruzDBException if an error occurs in the native library.
-   */
-  public void abort() throws CruzDBException {
-    abort(nativeHandle_);
-  }
-
   private native void disposeInternal(long handle);
   private native void put(long handle, byte[] key, int keyOffset, int keyLength,
       byte[] value, int valueOffset, int valueLength) throws CruzDBException;
@@ -64,5 +57,4 @@ public class Transaction extends CruzObject {
   private native void delete(long handle, byte[] key, int keyOffset,
       int keyLength) throws CruzDBException;
   private native void commit(long handle) throws CruzDBException;
-  private native void abort(long handle) throws CruzDBException;
 }

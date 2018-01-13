@@ -1,11 +1,14 @@
 #include "db_impl.h"
 
+// TODO: this is dumb... we should move these definitions out outside classes so
+// we don't have this issue..
 namespace cruzdb {
 
-SharedNodeRef NodePtr::fetch(std::vector<std::pair<int64_t, int>>& trace)
+SharedNodeRef NodePtr::fetch(boost::optional<NodeAddress>& address,
+    std::vector<NodeAddress>& trace)
 {
   assert(db_);
-  return db_->fetch(trace, csn_, offset_);
+  return db_->fetch(trace, address);
 }
 
 }

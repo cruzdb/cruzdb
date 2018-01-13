@@ -33,7 +33,7 @@ int main(int argc, char **argv)
     std::string data;
     ret = log->Read(pos, &data);
     if (ret == 0) {
-      cruzdb_proto::Intention i;
+      cruzdb_proto::AfterImage i;
       assert(i.ParseFromString(data));
       assert(i.IsInitialized());
 
@@ -45,8 +45,10 @@ int main(int argc, char **argv)
       writer.Uint(pos);
       writer.Key("bytes");
       writer.Uint(data.size());
+#if 0 // FIXME: not valid anymore
       writer.Key("snapshot");
       writer.Uint(i.snapshot());
+#endif
       writer.Key("tree");
       writer.StartArray();
 

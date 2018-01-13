@@ -34,8 +34,6 @@ public class CruzDBTest {
     CruzDB db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value".getBytes());
     assertArrayEquals(db.get("key1".getBytes()), "value".getBytes());
-
-    db.delete("key1".getBytes());
   }
 
   @Test

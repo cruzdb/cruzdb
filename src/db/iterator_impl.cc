@@ -13,7 +13,7 @@ class IteratorTraceApplier {
     db_->UpdateLRU(trace);
   }
 
-  std::vector<std::pair<int64_t, int>> trace;
+  std::vector<NodeAddress> trace;
 
  private:
   DBImpl *db_;

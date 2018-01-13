@@ -60,7 +60,7 @@ coverage
 
 build-doc
 
-db
+/db
 tags
 
 # static analysis

@@ -7,6 +7,8 @@
 #include <time.h>
 #include <sys/time.h>
 #include "cruzdb/db.h"
+#include "port/stack_trace.h"
+#include "db/db_impl.h"
 
 #if __APPLE__
 static inline uint64_t getns()
@@ -53,6 +55,8 @@ int main(int argc, char **argv)
     stop_after = atoi(argv[2]);
   }
 
+  rocksdb::port::InstallStackTraceHandler();
+
   zlog::Log *log;
   int ret = zlog::Log::Create("lmdb", "log", {{"path", db_path}}, "", "", &log);
   assert(ret == 0);
@@ -71,7 +75,7 @@ int main(int argc, char **argv)
 
   while (true) {
     auto txn = db->BeginTransaction();
-    int nkey = dis(gen);
+    int nkey = dis(gen); //total_txn_count; //dis(gen);
     const std::string key = tostr(nkey);
     txn->Put(key, key);
     txn->Commit();
@@ -82,7 +86,7 @@ int main(int argc, char **argv)
       double iops = (double)(txn_count * 1000000000ULL) / (double)dur_ns;
       std::cout << "sha1 dev-backend hostname: iops " << iops << std::endl;
       std::cout << "validating tree..." << std::flush;
-      //db->validate();
+      ((cruzdb::DBImpl*)db)->Validate();
       std::cout << " done" << std::endl << std::flush;
       txn_count = 0;
       start_ns = getns();

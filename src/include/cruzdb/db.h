@@ -51,13 +51,6 @@ class DB {
    * Lookup a key in the latest committed database snapshot.
    */
   virtual int Get(const zlog::Slice& key, std::string *value) = 0;
-
-  /*
-   *
-   */
-  virtual void write_dot_history(std::ostream& out,
-      std::vector<Snapshot*>& snapshots) = 0;
-  virtual void validate() = 0;
 };
 
 }

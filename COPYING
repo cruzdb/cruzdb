@@ -1,0 +1,3 @@
+Files: src/db/persistent_tree.{cc,h}
+Copyright: http://codereview.stackexchange.com/questions/119728/persistent-set-red-black-tree-follow-up
+License: Create Commons

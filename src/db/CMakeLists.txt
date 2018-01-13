@@ -8,6 +8,9 @@ add_library(cruzdb SHARED
   node_cache.cc
   iterator_impl.cc
   node.cc
+  persistent_tree.cc
+  db.cc
+  entry_service.cc
   ${PROTO_SRCS})
 target_include_directories(cruzdb
   PUBLIC ${PROTOBUF_INCLUDE_DIR})
@@ -22,9 +25,6 @@ install(TARGETS cruzdb LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 add_executable(thrash thrash.cc)
 target_link_libraries(thrash cruzdb)
-
-add_executable(rbt rbt.cc)
-target_link_libraries(rbt cruzdb)
 
 add_executable(bench bench.cc)
 target_link_libraries(bench cruzdb)
