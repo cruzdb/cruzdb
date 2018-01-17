@@ -1,7 +1,5 @@
-CruzDB is part of an ecosystem that includes ZLog
-(https://github.com/noahdesu/zlog). We are in the process of separating the two
-projects and migrating both under the umbrella of the https://github.com/cruzdb
-organization. Links and other things may temporarily be out-of-date.
+We are in the process of separating CruzDB from the ZLog project (https://github.com/cruzdb/zlog),
+migrating both under the umbrella of the https://github.com/cruzdb organization. Links, documentation, and other things may temporarily be out-of-date.
 
 A little background:
 
