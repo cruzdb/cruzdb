@@ -3,7 +3,7 @@ migrating both under the umbrella of the https://github.com/cruzdb organization.
 
 A little background:
 
-* Key-Value Store: https://nwat.io/blog/2016/08/02/introduction-to-the-zlog-transaction-key-value-store/
+* Key-Value Store: https://nwat.xyz/blog/2016/08/02/introduction-to-the-zlog-transaction-key-value-store/
 
 ## Build Notes
 
