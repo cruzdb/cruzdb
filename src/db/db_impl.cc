@@ -418,10 +418,10 @@ void DBImpl::TransactionProcessorEntry()
     }
     assert(root_offset);
 
-    assert(next_root->root_ != nullptr);
-    NodePtr root(next_root->root_, this);
+    assert(next_root->Root() != nullptr);
+    NodePtr root(next_root->Root(), this);
     if (root_offset) {
-      assert(next_root->root_ != Node::Nil());
+      assert(next_root->Root() != Node::Nil());
       root.SetIntentionAddress(intention_pos, *root_offset);
     }
 

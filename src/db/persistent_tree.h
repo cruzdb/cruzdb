@@ -68,6 +68,10 @@ class PersistentTree {
     return rid_;
   }
 
+  const SharedNodeRef& Root() const {
+    return root_;
+  }
+
   void SetIntention(uint64_t pos) {
     assert(!intention_);
     intention_ = pos;
@@ -188,8 +192,6 @@ class PersistentTree {
   //
   std::vector<SharedNodeRef> fresh_nodes_;
 
-  // TODO: so it can grab the root. this is only temporary for the parallel txn processing work.
-  friend class DBImpl;
 };
 
 }
