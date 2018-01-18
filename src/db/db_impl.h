@@ -137,13 +137,9 @@ class DBImpl : public DB {
   };
 
   void NotifyIntention(uint64_t pos);
-  void TransactionProcessor();
   bool ProcessConcurrentIntention(const Intention& intention);
   void NotifyTransaction(int64_t token, uint64_t intention_pos, bool committed);
   void ReplayIntention(PersistentTree *tree, const Intention& intention);
-
- private:
-  void TransactionWriter();
 
  private:
   std::mutex lock_;
@@ -185,16 +181,18 @@ class DBImpl : public DB {
   NodePtr root_;
   uint64_t root_snapshot_;
 
-  std::thread txn_writer_;
-  std::thread txn_processor_;
+  void TransactionProcessorEntry();
+  std::thread transaction_processor_thread_;
 
-  // handles various clean-up tasks. useful for absorbing potentially high
-  // latency memory freeing events.
-  void JanitorEntry();
   void AfterImageWriterEntry();
+  std::thread afterimage_writer_thread_;
+
+  void AfterImageFinalizerEntry();
+  std::thread afterimage_finalizer_thread_;
+
+  void JanitorEntry();
   std::condition_variable janitor_cond_;
   std::thread janitor_thread_;
-  std::thread ai_writer_thread_;
 };
 
 }

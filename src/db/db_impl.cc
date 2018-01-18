@@ -19,9 +19,10 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   root_snapshot_ = point.after_image.intention();
   last_intention_processed_ = root_snapshot_;
 
-  txn_writer_ = std::thread(&DBImpl::TransactionWriter, this);
-  ai_writer_thread_ = std::thread(&DBImpl::AfterImageWriterEntry, this);
-  txn_processor_ = std::thread(&DBImpl::TransactionProcessor, this);
+  transaction_processor_thread_ = std::thread(&DBImpl::TransactionProcessorEntry, this);
+  afterimage_writer_thread_ = std::thread(&DBImpl::AfterImageWriterEntry, this);
+  afterimage_finalizer_thread_ = std::thread(&DBImpl::AfterImageFinalizerEntry, this);
+
   janitor_thread_ = std::thread(&DBImpl::JanitorEntry, this);
 }
 
@@ -39,10 +40,10 @@ DBImpl::~DBImpl()
 
   unwritten_roots_cond_.notify_one();
 
+  transaction_processor_thread_.join();
+  afterimage_writer_thread_.join();
+  afterimage_finalizer_thread_.join();
 
-  txn_processor_.join();
-  txn_writer_.join();
-  ai_writer_thread_.join();
   cache_.Stop();
 }
 
@@ -345,7 +346,7 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
   }
 }
 
-void DBImpl::TransactionProcessor()
+void DBImpl::TransactionProcessorEntry()
 {
   while (true) {
     // next intention to process
@@ -489,7 +490,7 @@ void DBImpl::AfterImageWriterEntry()
 
 // 1. after image cache needs to be structured in a way that it can be trimmed.
 // currently it just bloats up.
-void DBImpl::TransactionWriter()
+void DBImpl::AfterImageFinalizerEntry()
 {
   std::unordered_map<uint64_t,
     std::pair<uint64_t, cruzdb_proto::AfterImage>> after_images_cache;
