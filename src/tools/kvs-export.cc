@@ -75,8 +75,12 @@ int main(int argc, char **argv)
         writer.Bool(node.left().nil());
         writer.Key("self");
         writer.Bool(node.left().self());
+        // TODO: this format of the log has changed since this was built and the
+        // export now needs updated, as well as the parser...
+#if 0
         writer.Key("csn");
         writer.Uint(node.left().csn());
+#endif
         writer.Key("off");
         writer.Uint(node.left().off());
         writer.EndObject();
@@ -87,8 +91,11 @@ int main(int argc, char **argv)
         writer.Bool(node.right().nil());
         writer.Key("self");
         writer.Bool(node.right().self());
+        // TODO: see above
+#if 0
         writer.Key("csn");
         writer.Uint(node.right().csn());
+#endif
         writer.Key("off");
         writer.Uint(node.right().off());
         writer.EndObject();

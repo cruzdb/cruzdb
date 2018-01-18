@@ -20,6 +20,7 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   last_intention_processed_ = root_snapshot_;
 
   txn_writer_ = std::thread(&DBImpl::TransactionWriter, this);
+  ai_writer_thread_ = std::thread(&DBImpl::AfterImageWriterEntry, this);
   txn_processor_ = std::thread(&DBImpl::TransactionProcessor, this);
   janitor_thread_ = std::thread(&DBImpl::JanitorEntry, this);
 }
@@ -41,6 +42,7 @@ DBImpl::~DBImpl()
 
   txn_processor_.join();
   txn_writer_.join();
+  ai_writer_thread_.join();
   cache_.Stop();
 }
 
@@ -187,7 +189,7 @@ void DBImpl::UpdateLRU(std::vector<NodeAddress>& trace)
   cache_.UpdateLRU(trace);
 }
 
-uint64_t DBImpl::IntentionToAfterImage(uint64_t intention_pos)
+boost::optional<uint64_t> DBImpl::IntentionToAfterImage(uint64_t intention_pos)
 {
   return cache_.IntentionToAfterImage(intention_pos);
 }
@@ -517,20 +519,14 @@ void DBImpl::TransactionProcessor()
 // 3
 // when an uncached after image has a physical location, we can fold it into
 // the cache and release those resources from the uncached set.
-void DBImpl::TransactionWriter()
-{
-  std::unordered_map<uint64_t,
-    std::pair<uint64_t, cruzdb_proto::AfterImage>> after_images_cache;
 
+
+
+void DBImpl::AfterImageWriterEntry()
+{
   while (true) {
     std::unique_lock<std::mutex> lk(lock_);
 
-    /*
-     * since this thread is handling both unwritten roots, as well as pending
-     * after images, there might be a lot of superfolous wake-ups arriving.
-     * we'll need to think about this as we get things more stable and are ready
-     * to refactor.
-     */
     if (!unwritten_roots_cond_.wait_for(lk, std::chrono::seconds(10),
           [&] { return !unwritten_roots_.empty() || stop_; })) {
       std::cout << "tw: no unwritten root produced for 2 seconds" << std::endl;
@@ -538,43 +534,20 @@ void DBImpl::TransactionWriter()
     }
 
     if (stop_)
-      return;
+      break;
 
-    // TODO: rid. rid also needs to go in the pointers so we can search for their
-    // physical address later..
-
-    /*
-     * step one to being able to free this root from memory (or more precisely
-     * put it under control of the caching system), we need to make sure it is
-     * saved to storage so that we can provide physical addresses of its nodes.
-     *
-     * we start with the oldest node...
-     */
     auto root_info = std::move(unwritten_roots_.front());
     unwritten_roots_.pop_front();
-    auto root = std::move(root_info.second);
     lk.unlock();
 
-    // serialize the after image to the end of the log. note that by design, any
-    // pointer contained in this after image either points to a node in its
-    // delta, or has a fully defined physical address.
-    cruzdb_proto::AfterImage after_image;
+    auto intention_pos = root_info.first;
+    auto& tree = root_info.second;
+
+    // serialization
     std::vector<SharedNodeRef> delta;
-
-    // 1. look-up the physical address for any pointers marked as pointing to
-    // volatile nodes. 2. assert the property that all nodes are either pointing
-    // internally, OR are fully defined physically.
-    //
-    // NOTE: here we don't alter the 
-    //
-    // After the serialization I/O complets we can then update the node pointers
-    // and probably also trim the index..
-    root->SerializeAfterImage(after_image, root_info.first, delta);
-
-    // set during serialization, provided when the intention was processed to
-    // produce this after image.
-    auto intention_pos = after_image.intention();
-    assert(intention_pos == root_info.first);
+    cruzdb_proto::AfterImage after_image;
+    tree->SerializeAfterImage(after_image, intention_pos, delta);
+    assert(after_image.intention() == intention_pos);
 
     std::string blob;
     cruzdb_proto::LogEntry entry;
@@ -585,92 +558,80 @@ void DBImpl::TransactionWriter()
     // cannot use entry after release...
     entry.release_after_image();
 
-    uint64_t ai_pos;
-    int ret = log_->Append(blob, &ai_pos);
+    // write it
+    uint64_t afterimage_pos;
+    int ret = log_->Append(blob, &afterimage_pos);
     assert(ret == 0);
-    assert(intention_pos < ai_pos);
+    assert(intention_pos < afterimage_pos);
 
-    //std::cout << "serialized intention @ " << intention_pos <<
-    //  " waiting on after image from log" << std::endl;
-
-    // to make sure everyone is using the same physical version, everyone should
-    // use the first instance in the log. since we may not have been the first
-    // to append, now we wait for this after image to show up in the log.
     lk.lock();
-    while (true) {
+    unresolved_roots_.emplace_back(intention_pos, std::move(tree));
+  }
+}
 
-      entry_service_.pending_after_images_cond_.wait(lk, [&] {
-        return !entry_service_.pending_after_images_.empty() || stop_;
-      });
+// 1. after image cache needs to be structured in a way that it can be trimmed.
+// currently it just bloats up.
+void DBImpl::TransactionWriter()
+{
+  std::unordered_map<uint64_t,
+    std::pair<uint64_t, cruzdb_proto::AfterImage>> after_images_cache;
 
-      if (stop_)
-        return;
+  while (true) {
+    std::unique_lock<std::mutex> lk(lock_);
 
-      //std::cout << "adding " << pending_after_images_.size()
-      //  << " pending after images" << std::endl;
+    entry_service_.pending_after_images_cond_.wait(lk, [&] {
+      return !entry_service_.pending_after_images_.empty() || stop_; });
 
-      // TODO: this drop duplicates on the floor, which it should, but the cache
-      // is never trimmed. so we need to add some type of low water mark here
-      // that we can purge.
-      //
-      // TODO: make sure to consider the case that an after image arrives here
-      // for processing before its made it through transaction processing. since
-      // io reading and dispatch are asynchonous, this will likely occur often.
-      // after first glance it seems totally fine. we are driven by transactions
-      // that finish (above), and then just wait on the corresponding after
-      // image to arrive...
-      for (auto ai : entry_service_.pending_after_images_) {
-        auto key = ai.second.intention();
-        if (after_images_cache.find(key) == after_images_cache.end()) {
-          //std::cout << "caching after image for intention @ " << key << std::endl;
-          assert(key >= 0);
-          assert((uint64_t)key < ai.first);
-          after_images_cache[key] = ai;
-        }
+    if (stop_)
+      break;
+
+    for (auto ai : entry_service_.pending_after_images_) {
+      auto key = ai.second.intention();
+      if (after_images_cache.find(key) == after_images_cache.end()) {
+        assert(key >= 0);
+        assert((uint64_t)key < ai.first);
+        after_images_cache[key] = ai;
       }
-      entry_service_.pending_after_images_.clear();
+    }
+    entry_service_.pending_after_images_.clear();
 
-      // are we still waiting on the after image from above...?
-      auto it = after_images_cache.find(intention_pos);
-      if (it == after_images_cache.end()) {
-        //std::cout << "NOT FOUND cached after image for intention @ " << intention_pos << std::endl;
+    std::list<std::pair<uint64_t,
+      std::unique_ptr<PersistentTree>>> roots;
+    roots.swap(unresolved_roots_);
+    lk.unlock();
+
+    auto it = roots.begin();
+    while (it != roots.end()) {
+      auto intention_pos = it->first;
+
+      auto it2 = after_images_cache.find(intention_pos);
+      if (it2 == after_images_cache.end()) {
+        it++;
         continue;
       }
 
-      //std::cout << "FOUND cached after image for intention @ " << intention_pos << std::endl;
+      auto tree = std::move(it->second);
+      it = roots.erase(it);
 
-      // this sets the csn on all the self referencing nodes to be the actual
-      // physical position that they are stored at in the log.
-      //
-      // deal with races...
-      //root->SetDeltaPosition(delta, it->first);
+      // just a hack... should reuse previous calc of delta...
+      std::vector<SharedNodeRef> delta;
+      {
+        cruzdb_proto::AfterImage after_image;
+        tree->SerializeAfterImage(after_image, intention_pos, delta);
+        assert(after_image.intention() == intention_pos);
+      }
 
-      // update the index that allows node pointers being copied to resolve
-      // their physical log location. TODO: use some sort of threshold for
-      // expiring entries out of this index. TODO: how does node copy know that
-      // the info can be found in this idnex?
-
-      assert(intention_pos < it->second.first);
-      //auto r = intention_to_after_image_pos_.emplace(intention_pos, it->second.first);
-      //assert(r.second);
-
-      // TODO: so... this is a contention point. there are readers of the state
-      // we are now changing... this will need to be a big part of the refactor.
-      //
-      // TODO: setting the delta position only updates new self pointer in new
-      // nodes. it might be a new node contains a pointer that was copied which
-      // points into the volatile space. so, this needs to be taken into account
-      // when determing when to trim the index.
-      root->SetDeltaPosition(delta, it->second.first);
-      cache_.SetIntentionMapping(intention_pos, it->second.first);
-
-      // TODO: we could also add some assertions here that all pointers in the
-      // delta being added to the cache have been converted to after image
-      // pointers. that should be the case...
-      cache_.ApplyAfterImageDelta(delta, it->second.first);
-
-      break;
+      lk.lock();
+      assert(intention_pos < it2->second.first);
+      tree->SetDeltaPosition(delta, it2->second.first);
+      cache_.SetIntentionMapping(intention_pos, it2->second.first);
+      cache_.ApplyAfterImageDelta(delta, it2->second.first);
+      lk.unlock();
     }
+
+    lk.lock();
+    unresolved_roots_.splice(unresolved_roots_.end(), roots);
+    lk.unlock();
   }
 }
 

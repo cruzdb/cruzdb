@@ -67,7 +67,7 @@ class DBImpl : public DB {
   // caching
  public:
   void UpdateLRU(std::vector<NodeAddress>& trace);
-  uint64_t IntentionToAfterImage(uint64_t intention_pos);
+  boost::optional<uint64_t> IntentionToAfterImage(uint64_t intention_pos);
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
       boost::optional<NodeAddress>& address);
 
@@ -163,6 +163,8 @@ class DBImpl : public DB {
   int64_t in_flight_txn_rid_;
   std::set<uint64_t> intention_map_;
 
+  std::list<std::pair<uint64_t, std::unique_ptr<PersistentTree>>> unresolved_roots_;
+
  private:
   // finished transactions indexed by their intention position and used by the
   // transaction processor to avoid replaying serial intentions.
@@ -189,8 +191,10 @@ class DBImpl : public DB {
   // handles various clean-up tasks. useful for absorbing potentially high
   // latency memory freeing events.
   void JanitorEntry();
+  void AfterImageWriterEntry();
   std::condition_variable janitor_cond_;
   std::thread janitor_thread_;
+  std::thread ai_writer_thread_;
 };
 
 }
