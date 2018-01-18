@@ -433,7 +433,7 @@ void DBImpl::TransactionProcessorEntry()
     assert(last_intention_processed_ < intention_pos);
     last_intention_processed_ = intention_pos;
 
-    unwritten_roots_.emplace_back(std::move(next_root));
+    lcs_trees_.emplace_back(std::move(next_root));
     unwritten_roots_cond_.notify_one();
 
     NotifyTransaction(intention->Token(), intention_pos, true);
@@ -448,7 +448,7 @@ void DBImpl::AfterImageWriterEntry()
     std::unique_lock<std::mutex> lk(lock_);
 
     if (!unwritten_roots_cond_.wait_for(lk, std::chrono::seconds(10),
-          [&] { return !unwritten_roots_.empty() || stop_; })) {
+          [&] { return !lcs_trees_.empty() || stop_; })) {
       std::cout << "tw: no unwritten root produced for 2 seconds" << std::endl;
       continue;
     }
@@ -456,8 +456,8 @@ void DBImpl::AfterImageWriterEntry()
     if (stop_)
       break;
 
-    auto tree = std::move(unwritten_roots_.front());
-    unwritten_roots_.pop_front();
+    auto tree = std::move(lcs_trees_.front());
+    lcs_trees_.pop_front();
     lk.unlock();
 
     auto intention_pos = tree->Intention();
@@ -484,7 +484,7 @@ void DBImpl::AfterImageWriterEntry()
     assert(intention_pos < afterimage_pos);
 
     lk.lock();
-    unresolved_roots_.emplace_back(std::move(tree));
+    uncached_lcs_trees_.emplace_back(std::move(tree));
   }
 }
 
@@ -515,7 +515,7 @@ void DBImpl::AfterImageFinalizerEntry()
     entry_service_.pending_after_images_.clear();
 
     std::list<std::unique_ptr<PersistentTree>> roots;
-    roots.swap(unresolved_roots_);
+    roots.swap(uncached_lcs_trees_);
     lk.unlock();
 
     auto it = roots.begin();
@@ -548,7 +548,7 @@ void DBImpl::AfterImageFinalizerEntry()
     }
 
     lk.lock();
-    unresolved_roots_.splice(unresolved_roots_.end(), roots);
+    uncached_lcs_trees_.splice(uncached_lcs_trees_.end(), roots);
     lk.unlock();
   }
 }

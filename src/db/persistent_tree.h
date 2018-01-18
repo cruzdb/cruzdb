@@ -55,6 +55,11 @@ class PersistentTree {
     intention_(intention)
   {}
 
+  PersistentTree(const PersistentTree& other) = delete;
+  PersistentTree(const PersistentTree&& other) = delete;
+  PersistentTree& operator=(const PersistentTree& other) = delete;
+  PersistentTree& operator=(const PersistentTree&& other) = delete;
+
  public:
   void Put(const zlog::Slice& key, const zlog::Slice& value);
   void Delete(const zlog::Slice& key);
