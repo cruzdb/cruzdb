@@ -357,7 +357,7 @@ void DBImpl::TransactionProcessor()
 
     // serial intention?
     assert(root_snapshot_ < intention_pos);
-    auto serial = root_snapshot_ == intention->Snapshot();
+    const auto serial = root_snapshot_ == intention->Snapshot();
 
     // check for conflicts
     bool abort;
