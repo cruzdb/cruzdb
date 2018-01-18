@@ -153,7 +153,7 @@ class DBImpl : public DB {
 
   EntryService entry_service_;
 
-  std::list<std::pair<uint64_t, std::unique_ptr<PersistentTree>>> unwritten_roots_;
+  std::list<std::unique_ptr<PersistentTree>> unwritten_roots_;
   std::condition_variable unwritten_roots_cond_;
 
   TransactionFinder txn_finder_;
@@ -163,7 +163,7 @@ class DBImpl : public DB {
   int64_t in_flight_txn_rid_;
   std::set<uint64_t> intention_map_;
 
-  std::list<std::pair<uint64_t, std::unique_ptr<PersistentTree>>> unresolved_roots_;
+  std::list<std::unique_ptr<PersistentTree>> unresolved_roots_;
 
  private:
   // finished transactions indexed by their intention position and used by the

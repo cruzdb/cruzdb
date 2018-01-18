@@ -406,7 +406,8 @@ void DBImpl::TransactionProcessor()
       // can write to root_.
       std::unique_lock<std::mutex> lk(lock_);
       next_root = std::make_unique<PersistentTree>(this, root_,
-          static_cast<int64_t>(intention_pos));
+          static_cast<int64_t>(intention_pos),
+          intention_pos);
       lk.unlock();
       ReplayIntention(next_root.get(), *intention);
       root_offset = next_root->infect_self_pointers(intention_pos, true);
@@ -431,7 +432,7 @@ void DBImpl::TransactionProcessor()
     assert(last_intention_processed_ < intention_pos);
     last_intention_processed_ = intention_pos;
 
-    unwritten_roots_.emplace_back(intention_pos, std::move(next_root));
+    unwritten_roots_.emplace_back(std::move(next_root));
     unwritten_roots_cond_.notify_one();
 
     NotifyTransaction(intention->Token(), intention_pos, true);
@@ -536,12 +537,11 @@ void DBImpl::AfterImageWriterEntry()
     if (stop_)
       break;
 
-    auto root_info = std::move(unwritten_roots_.front());
+    auto tree = std::move(unwritten_roots_.front());
     unwritten_roots_.pop_front();
     lk.unlock();
 
-    auto intention_pos = root_info.first;
-    auto& tree = root_info.second;
+    auto intention_pos = tree->Intention();
 
     // serialization
     std::vector<SharedNodeRef> delta;
@@ -565,7 +565,7 @@ void DBImpl::AfterImageWriterEntry()
     assert(intention_pos < afterimage_pos);
 
     lk.lock();
-    unresolved_roots_.emplace_back(intention_pos, std::move(tree));
+    unresolved_roots_.emplace_back(std::move(tree));
   }
 }
 
@@ -595,14 +595,13 @@ void DBImpl::TransactionWriter()
     }
     entry_service_.pending_after_images_.clear();
 
-    std::list<std::pair<uint64_t,
-      std::unique_ptr<PersistentTree>>> roots;
+    std::list<std::unique_ptr<PersistentTree>> roots;
     roots.swap(unresolved_roots_);
     lk.unlock();
 
     auto it = roots.begin();
     while (it != roots.end()) {
-      auto intention_pos = it->first;
+      auto intention_pos = (*it)->Intention();
 
       auto it2 = after_images_cache.find(intention_pos);
       if (it2 == after_images_cache.end()) {
@@ -610,7 +609,7 @@ void DBImpl::TransactionWriter()
         continue;
       }
 
-      auto tree = std::move(it->second);
+      auto tree = std::move(*it);
       it = roots.erase(it);
 
       // just a hack... should reuse previous calc of delta...
@@ -649,7 +648,9 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   assert(ret == 0);
 
   // MOVE txn's tree into index for txn processor
-  finished_txns_.Insert(pos, std::move(txn->Tree()));
+  auto tree = std::move(txn->Tree());
+  tree->SetIntention(pos);
+  finished_txns_.Insert(pos, std::move(tree));
 
   bool committed = txn_finder_.WaitOnTransaction(waiter, pos);
 

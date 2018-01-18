@@ -39,13 +39,20 @@ namespace cruzdb {
  */
 class PersistentTree {
  public:
-  PersistentTree(DBImpl *db,
-      NodePtr root,
-      int64_t rid) :
+  PersistentTree(DBImpl *db, NodePtr root, int64_t rid) :
     db_(db),
     src_root_(root),
     root_(nullptr),
-    rid_(rid)
+    rid_(rid),
+    intention_(boost::none)
+  {}
+
+  PersistentTree(DBImpl *db, NodePtr root, int64_t rid, uint64_t intention) :
+    db_(db),
+    src_root_(root),
+    root_(nullptr),
+    rid_(rid),
+    intention_(intention)
   {}
 
  public:
@@ -59,6 +66,16 @@ class PersistentTree {
 
   int64_t rid() const {
     return rid_;
+  }
+
+  void SetIntention(uint64_t pos) {
+    assert(!intention_);
+    intention_ = pos;
+  }
+
+  uint64_t Intention() const {
+    assert(intention_);
+    return *intention_;
   }
 
   // serialization and fix-up
@@ -150,6 +167,8 @@ class PersistentTree {
    private:
     PersistentTree *tree_;
   };
+
+  boost::optional<uint64_t> intention_;
 
   // access trace used to update lru cache. the trace is applied and reset
   // after each operation (e.g. get/put/etc) or if the transaction accesses
