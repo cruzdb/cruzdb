@@ -161,7 +161,6 @@ class DBImpl : public DB {
   int64_t in_flight_txn_rid_;
   std::set<uint64_t> intention_map_;
 
-
  private:
   // finished transactions indexed by their intention position and used by the
   // transaction processor to avoid replaying serial intentions.

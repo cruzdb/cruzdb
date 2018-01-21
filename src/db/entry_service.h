@@ -74,6 +74,11 @@ class EntryService {
   std::list<std::pair<uint64_t, cruzdb_proto::AfterImage>> pending_after_images_;
   std::condition_variable pending_after_images_cond_;
 
+  // read the intentions in the provided set. this interface should be
+  // asychronous: the caller doesn't need the results in order, nor as a
+  // complete result set.
+  std::list<Intention> ReadIntentions(std::vector<uint64_t> addrs);
+
  private:
   void Run();
   void IntentionReader();

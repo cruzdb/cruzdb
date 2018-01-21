@@ -259,43 +259,32 @@ void DBImpl::NotifyIntention(uint64_t pos)
 
 bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
 {
-  auto snapshot = intention.Snapshot();
-  assert(snapshot < root_snapshot_); // concurrent property
-
-  auto it = intention_map_.find(snapshot);
-  assert(it != intention_map_.end());
-  it++; // start immediately after snapshot
-
   // set of keys read or written by the intention
-  std::set<std::string> intention_keys;
-  for (auto op : intention) {
-    intention_keys.insert(op.key());
+  auto intention_keys = intention.OpKeys();
+
+  // retrieve all of the intentions in the conflict zone.
+  std::vector<uint64_t> intentions;
+  {
+    auto snapshot = intention.Snapshot();
+    assert(snapshot < root_snapshot_);
+
+    auto first = intention_map_.find(snapshot);
+    assert(first != intention_map_.end());
+
+    auto last = intention_map_.find(root_snapshot_);
+    assert(last != intention_map_.end());
+
+    // converts [first, last) to (first, last] since the snapshot is not in the
+    // conflict zone, and root_snapshot_ is.
+    std::copy(std::next(first),
+        std::next(last), std::back_inserter(intentions));
   }
 
-  while (true) {
-    // next intention to examine for conflicts
-    assert(it != intention_map_.end());
-    uint64_t intent_pos = *it;
+  auto other_intentions = entry_service_.ReadIntentions(intentions);
 
-    // read intention from the log
-    std::string data;
-    int ret = log_->Read(intent_pos, &data);
-    assert(ret == 0);
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
-    assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
-
+  for (auto& other_intention : other_intentions) {
     // set of keys modified by the intention in the conflict zone
-    const auto& other_intention = entry.intention();
-    std::set<std::string> other_intention_keys;
-    for (int i = 0; i < other_intention.ops_size(); i++) {
-      auto& op = other_intention.ops(i);
-      if (op.op() == cruzdb_proto::TransactionOp::PUT ||
-          op.op() == cruzdb_proto::TransactionOp::DELETE) {
-        other_intention_keys.insert(op.key());
-      }
-    }
+    auto other_intention_keys = other_intention.UpdateOpKeys();
 
     // return abort=true if the set of keys intersect
     for (auto k0 : intention_keys) {
@@ -304,11 +293,6 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
         return true;
       }
     }
-
-    if (intent_pos == root_snapshot_)
-      break;
-
-    it++;
   }
 
   return false;
@@ -377,9 +361,10 @@ void DBImpl::TransactionProcessorEntry()
       continue;
     }
 
-    // save the location of the next intention that committed. note for the
-    // future: we are not holding any locks here because this thread has
-    // execlusive access to this index.
+    // TODO: this records the intentions that have committed. during conflict
+    // resolution we need access to arbitrary ranges of committed intention
+    // positions, but we also can't let this grow unbounded. so we'll need to
+    // store this out-of-core at some point.
     {
       auto ret = intention_map_.emplace(intention_pos);
       assert(ret.second);

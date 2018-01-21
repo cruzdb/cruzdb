@@ -275,4 +275,22 @@ void EntryService::IntentionQueue::Push(Intention intention)
   cond_.notify_one();
 }
 
+std::list<Intention>
+EntryService::ReadIntentions(std::vector<uint64_t> addrs)
+{
+  std::list<Intention> intentions;
+  assert(!addrs.empty());
+  for (auto pos : addrs) {
+    std::string data;
+    int ret = log_->Read(pos, &data);
+    assert(ret == 0);
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+    assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
+    intentions.emplace_back(Intention(entry.intention(), pos));
+  }
+  return intentions;
+}
+
 }
