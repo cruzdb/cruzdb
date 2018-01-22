@@ -5,6 +5,7 @@
 #include <queue>
 #include <thread>
 #include <boost/optional.hpp>
+#include "db/persistent_tree.h"
 #include <zlog/log.h>
 #include "db/intention.h"
 
@@ -71,13 +72,66 @@ class EntryService {
   // will remain valid until the entry service is destroyed.
   IntentionQueue *NewIntentionQueue(uint64_t pos);
 
-  std::list<std::pair<uint64_t, cruzdb_proto::AfterImage>> pending_after_images_;
-  std::condition_variable pending_after_images_cond_;
-
   // read the intentions in the provided set. this interface should be
   // asychronous: the caller doesn't need the results in order, nor as a
   // complete result set.
   std::list<Intention> ReadIntentions(std::vector<uint64_t> addrs);
+
+  // matches intentions with their primary afterimage in the log
+  class PrimaryAfterImageMatcher {
+   public:
+    PrimaryAfterImageMatcher();
+
+    // watch for an intention's afterimage.
+    //
+    // intention watches MUST be set strictly in the order that intentions
+    // appear in the log, but many of inflight watches can be active at once.
+    // the reason is related to how we garbage collect the de-duplication index.
+    //
+    // we need to identify two things. the first is a threshold below which the
+    // de-duplication index can ignore new afterimages that show up in the log.
+    // this point is the minimum position below which all intentions have been
+    // matched up with their after images. the second is a threshold that lets
+    // the GC process know that no new intention watches will be added. since we
+    // are adding the intentions in strict log order, then for any point in the
+    // index we know that below that point the index is complete.
+    void watch(std::unique_ptr<PersistentTree> intention);
+
+    // add an afterimage from the log
+    void push(const cruzdb_proto::AfterImage& ai, uint64_t pos);
+
+    // get intention/afterimage match
+    std::unique_ptr<PersistentTree> match();
+
+    // notify stream consumers
+    void shutdown();
+
+   private:
+    // (pos, nullptr)  -> after image, no intention waiter
+    // (none, set)     -> intention waiter, no after image
+    // (none, nullptr) -> matched. can be removed from index
+    struct PrimaryAfterImage {
+      boost::optional<uint64_t> pos;
+      std::unique_ptr<PersistentTree> tree;
+    };
+
+    // gc the dedup index
+    void gc();
+
+    std::mutex lock_;
+    bool shutdown_;
+    uint64_t matched_watermark_;
+    std::condition_variable cond_;
+
+    // rendezvous point and de-duplication index
+    // intention position --> primary after image
+    std::map<uint64_t, PrimaryAfterImage> afterimages_;
+
+    // intentions matched with primary after image
+    std::list<std::unique_ptr<PersistentTree>> matched_;
+  };
+
+  PrimaryAfterImageMatcher ai_matcher;
 
  private:
   void Run();

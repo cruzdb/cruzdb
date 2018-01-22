@@ -430,6 +430,7 @@ void DBImpl::TransactionProcessorEntry()
 void DBImpl::AfterImageWriterEntry()
 {
   while (true) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
     std::unique_lock<std::mutex> lk(lock_);
 
     if (!unwritten_roots_cond_.wait_for(lk, std::chrono::seconds(10),
@@ -441,100 +442,85 @@ void DBImpl::AfterImageWriterEntry()
     if (stop_)
       break;
 
-    auto tree = std::move(lcs_trees_.front());
-    lcs_trees_.pop_front();
+    std::vector<std::pair<std::string, std::unique_ptr<PersistentTree>>> trees;
+    for (auto& tree : lcs_trees_) {
+      trees.emplace_back("", std::move(tree));
+    }
+    lcs_trees_.clear();
+
     lk.unlock();
 
-    auto intention_pos = tree->Intention();
+    for (auto& tree_info : trees) {
+      auto tree = std::move(tree_info.second);
+      const auto intention_pos = tree->Intention();
 
-    // serialization
-    std::vector<SharedNodeRef> delta;
-    cruzdb_proto::AfterImage after_image;
-    tree->SerializeAfterImage(after_image, intention_pos, delta);
-    assert(after_image.intention() == intention_pos);
+      std::vector<SharedNodeRef> delta;
+      cruzdb_proto::AfterImage after_image;
+      tree->SerializeAfterImage(after_image, intention_pos, delta);
+      assert(after_image.intention() == intention_pos);
 
-    std::string blob;
-    cruzdb_proto::LogEntry entry;
-    entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
-    entry.set_allocated_after_image(&after_image);
-    assert(entry.IsInitialized());
-    assert(entry.SerializeToString(&blob));
-    // cannot use entry after release...
-    entry.release_after_image();
+      std::string blob;
+      cruzdb_proto::LogEntry entry;
+      entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
+      entry.set_allocated_after_image(&after_image);
+      assert(entry.IsInitialized());
+      assert(entry.SerializeToString(&blob));
+      entry.release_after_image();
 
-    // write it
-    uint64_t afterimage_pos;
-    int ret = log_->Append(blob, &afterimage_pos);
-    assert(ret == 0);
-    assert(intention_pos < afterimage_pos);
+      tree_info.first = blob;
 
-    lk.lock();
-    uncached_lcs_trees_.emplace_back(std::move(tree));
+      entry_service_.ai_matcher.watch(std::move(tree));
+    }
+
+    // this whole copy, shuffle, loop thing is mostly to just stress out the
+    // rendezvous mechanism between this thread and the thread that adds the
+    // afterimage to the cache. once we have actual aio here, this can all be
+    // simplified / removed.
+    //
+    // note that above they are registered in log order with entry service, but
+    // then the io is random. this is consistent with how we will register
+    // directly as they pop off the queue, then dispatch aio
+    std::random_shuffle(trees.begin(), trees.end());
+
+    // ok, the serialization is done again down here to reproduce the blob. it
+    // isn't removed from above, or move here, because we need to go through and
+    // make sure that there isn't some side effects from serialization (like
+    // setting the intention on the tree before registering) as that method
+    // isn't const. in any case, it should be idempotent, so no harm, just
+    // wasteful and silly.
+    for (auto& tree_info : trees) {
+      uint64_t afterimage_pos;
+      int ret = log_->Append(tree_info.first, &afterimage_pos);
+      assert(ret == 0);
+    }
   }
 }
 
-// 1. after image cache needs to be structured in a way that it can be trimmed.
-// currently it just bloats up.
 void DBImpl::AfterImageFinalizerEntry()
 {
-  std::unordered_map<uint64_t,
-    std::pair<uint64_t, cruzdb_proto::AfterImage>> after_images_cache;
-
   while (true) {
+    auto tree = entry_service_.ai_matcher.match();
+    if (!tree)
+      break;
+
+    auto ipos = tree->Intention();
+    auto ai_pos = tree->AfterImage();
+
+    std::vector<SharedNodeRef> delta;
+    {
+      cruzdb_proto::AfterImage after_image;
+      tree->SerializeAfterImage(after_image, ipos, delta);
+      assert(after_image.intention() == ipos);
+    }
+
     std::unique_lock<std::mutex> lk(lock_);
-
-    entry_service_.pending_after_images_cond_.wait(lk, [&] {
-      return !entry_service_.pending_after_images_.empty() || stop_; });
-
     if (stop_)
       break;
 
-    for (auto ai : entry_service_.pending_after_images_) {
-      auto key = ai.second.intention();
-      if (after_images_cache.find(key) == after_images_cache.end()) {
-        assert(key >= 0);
-        assert((uint64_t)key < ai.first);
-        after_images_cache[key] = ai;
-      }
-    }
-    entry_service_.pending_after_images_.clear();
-
-    std::list<std::unique_ptr<PersistentTree>> roots;
-    roots.swap(uncached_lcs_trees_);
-    lk.unlock();
-
-    auto it = roots.begin();
-    while (it != roots.end()) {
-      auto intention_pos = (*it)->Intention();
-
-      auto it2 = after_images_cache.find(intention_pos);
-      if (it2 == after_images_cache.end()) {
-        it++;
-        continue;
-      }
-
-      auto tree = std::move(*it);
-      it = roots.erase(it);
-
-      // just a hack... should reuse previous calc of delta...
-      std::vector<SharedNodeRef> delta;
-      {
-        cruzdb_proto::AfterImage after_image;
-        tree->SerializeAfterImage(after_image, intention_pos, delta);
-        assert(after_image.intention() == intention_pos);
-      }
-
-      lk.lock();
-      assert(intention_pos < it2->second.first);
-      tree->SetDeltaPosition(delta, it2->second.first);
-      cache_.SetIntentionMapping(intention_pos, it2->second.first);
-      cache_.ApplyAfterImageDelta(delta, it2->second.first);
-      lk.unlock();
-    }
-
-    lk.lock();
-    uncached_lcs_trees_.splice(uncached_lcs_trees_.end(), roots);
-    lk.unlock();
+    assert(ipos < ai_pos);
+    tree->SetDeltaPosition(delta, ai_pos);
+    cache_.SetIntentionMapping(ipos, ai_pos);
+    cache_.ApplyAfterImageDelta(delta, ai_pos);
   }
 }
 

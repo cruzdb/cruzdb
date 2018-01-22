@@ -44,7 +44,8 @@ class PersistentTree {
     src_root_(root),
     root_(nullptr),
     rid_(rid),
-    intention_(boost::none)
+    intention_(boost::none),
+    afterimage_(boost::none)
   {}
 
   PersistentTree(DBImpl *db, NodePtr root, int64_t rid, uint64_t intention) :
@@ -52,7 +53,8 @@ class PersistentTree {
     src_root_(root),
     root_(nullptr),
     rid_(rid),
-    intention_(intention)
+    intention_(intention),
+    afterimage_(boost::none)
   {}
 
   PersistentTree(const PersistentTree& other) = delete;
@@ -85,6 +87,16 @@ class PersistentTree {
   uint64_t Intention() const {
     assert(intention_);
     return *intention_;
+  }
+
+  void SetAfterImage(uint64_t pos) {
+    assert(!afterimage_);
+    afterimage_ = pos;
+  }
+
+  uint64_t AfterImage() const {
+    assert(afterimage_);
+    return *afterimage_;
   }
 
   // serialization and fix-up
@@ -178,6 +190,7 @@ class PersistentTree {
   };
 
   boost::optional<uint64_t> intention_;
+  boost::optional<uint64_t> afterimage_;
 
   // access trace used to update lru cache. the trace is applied and reset
   // after each operation (e.g. get/put/etc) or if the transaction accesses

@@ -152,8 +152,6 @@ class DBImpl : public DB {
   std::list<std::unique_ptr<PersistentTree>> lcs_trees_;
   std::condition_variable unwritten_roots_cond_;
 
-  std::list<std::unique_ptr<PersistentTree>> uncached_lcs_trees_;
-
   TransactionFinder txn_finder_;
   std::map<uint64_t, std::pair<std::condition_variable*, bool*>> waiting_on_log_entry_;
   EntryService::IntentionQueue *intention_queue_;
