@@ -10,7 +10,7 @@ namespace cruzdb {
 // addresses...
 
 // TODO: if usage goes above high marker block new txns
-static const size_t low_marker  =  128*1024*1024;
+static const size_t low_marker  =  512*1024*1024;
 //static const size_t high_marker = 8*1024*1024;
 
 void NodeCache::do_vaccum_()
@@ -86,15 +86,73 @@ void NodeCache::do_vaccum_()
 
 // when resolving a node we only resolve the single node. figuring out when to
 // resolve an entire intention would be interesting.
+//
+// when fetching an address, it will either be an afterimage address, or it will
+// be an intention that resolves to an afterimage. that resolution will always
+// succeed because we don't let the in-memory pointer expire until after we've
+// created an index entry. when reading nodes from the log, pointers with
+// intentions are resolved before being allowed into memory.
 SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
     boost::optional<NodeAddress>& address)
 {
+  uint64_t afterimage;
   auto offset = address->Offset();
-  auto csn = address->Position();
-  if (!address->IsAfterImage()) {
-    csn = IntentionToAfterImage(csn);
+  if (address->IsAfterImage()) {
+    afterimage = address->Position();
+  } else {
+    auto tmp = IntentionToAfterImage(address->Position());
+    if (tmp) {
+      afterimage = *tmp;
+    } else {
+      // look up from cache index, or main index, but definitely minimize the
+      // times we have resort to scanning! hey look, another time we need to
+      // have a scan!
+      const auto intention = address->Position();
+      auto pos = intention + 1;
+      while (true) {
+        bool done = false;
+
+        // i wouldn't be surprised if tehre was a scenario in which we read to
+        // the end of the log without finding the afterimage. especially on some
+        // startup scenario.... so....
+        std::string data;
+        int ret = log_->Read(pos, &data);
+        assert(ret == 0);
+
+        cruzdb_proto::LogEntry entry;
+        assert(entry.ParseFromString(data));
+        assert(entry.IsInitialized());
+
+        switch (entry.type()) {
+          case cruzdb_proto::LogEntry::INTENTION:
+            break;
+
+          case cruzdb_proto::LogEntry::AFTER_IMAGE:
+            {
+              auto ai = entry.after_image();
+              if (ai.intention() == intention) {
+                // obvs an index cache needs to be updated now
+                afterimage = pos;
+                done = true;
+                break;
+              }
+            }
+            break;
+
+          default:
+            assert(0);
+            exit(1);
+        }
+
+        if (done)
+          break;
+
+        pos++;
+      }
+    }
   }
-  auto key = std::make_pair(csn, offset);
+
+  auto key = std::make_pair(afterimage, offset);
 
   auto slot = pair_hash()(key) % num_slots_;
   auto& shard = shards_[slot];
@@ -130,7 +188,7 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
   }
 
   std::string snapshot;
-  int ret = log_->Read(csn, &snapshot);
+  int ret = log_->Read(afterimage, &snapshot);
   assert(ret == 0);
 
   cruzdb_proto::LogEntry log_entry;
@@ -140,7 +198,9 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
   assert(log_entry.type() == cruzdb_proto::LogEntry::AFTER_IMAGE);
   auto i = log_entry.after_image();
 
-  auto nn = deserialize_node(i, csn, offset);
+  // TODO: this probably changes when resolving through intention rather than
+  // after image no?
+  auto nn = deserialize_node(i, afterimage, offset);
 
   // add to cache. make sure it didn't show up after we released the lock to
   // read the node from the log.
@@ -253,27 +313,31 @@ SharedNodeRef NodeCache::deserialize_node(const cruzdb_proto::AfterImage& i,
       nullptr, nullptr, i.intention(), false, db_);
 
   if (!n.left().nil()) {
-    uint64_t position;
     uint16_t offset = n.left().off();
     if (n.left().self()) {
-      position = pos;
+      nn->left.SetAfterImageAddress(pos, offset);
+    } else if (n.left().has_afterimage()) {
+      assert(!n.left().has_intention());
+      nn->left.SetAfterImageAddress(n.left().afterimage(), offset);
     } else {
-      position = n.left().csn();
+      assert(n.left().has_intention());
+      nn->left.SetIntentionAddress(n.left().intention(), offset);
     }
-    nn->left.SetAfterImageAddress(position, offset);
   } else {
     nn->left.set_ref(Node::Nil());
   }
 
   if (!n.right().nil()) {
-    uint64_t position;
     uint16_t offset = n.right().off();
     if (n.right().self()) {
-      position = pos;
+      nn->right.SetAfterImageAddress(pos, offset);
+    } else if (n.right().has_afterimage()) {
+      assert(!n.right().has_intention());
+      nn->right.SetAfterImageAddress(n.right().afterimage(), offset);
     } else {
-      position = n.right().csn();
+      assert(n.right().has_intention());
+      nn->right.SetIntentionAddress(n.right().intention(), offset);
     }
-    nn->right.SetAfterImageAddress(position, offset);
   } else {
     nn->right.set_ref(Node::Nil());
   }

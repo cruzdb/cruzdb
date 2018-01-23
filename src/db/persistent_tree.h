@@ -39,14 +39,28 @@ namespace cruzdb {
  */
 class PersistentTree {
  public:
-  PersistentTree(DBImpl *db,
-      NodePtr root,
-      int64_t rid) :
+  PersistentTree(DBImpl *db, NodePtr root, int64_t rid) :
     db_(db),
     src_root_(root),
     root_(nullptr),
-    rid_(rid)
+    rid_(rid),
+    intention_(boost::none),
+    afterimage_(boost::none)
   {}
+
+  PersistentTree(DBImpl *db, NodePtr root, int64_t rid, uint64_t intention) :
+    db_(db),
+    src_root_(root),
+    root_(nullptr),
+    rid_(rid),
+    intention_(intention),
+    afterimage_(boost::none)
+  {}
+
+  PersistentTree(const PersistentTree& other) = delete;
+  PersistentTree(const PersistentTree&& other) = delete;
+  PersistentTree& operator=(const PersistentTree& other) = delete;
+  PersistentTree& operator=(const PersistentTree&& other) = delete;
 
  public:
   void Put(const zlog::Slice& key, const zlog::Slice& value);
@@ -59,6 +73,30 @@ class PersistentTree {
 
   int64_t rid() const {
     return rid_;
+  }
+
+  const SharedNodeRef& Root() const {
+    return root_;
+  }
+
+  void SetIntention(uint64_t pos) {
+    assert(!intention_);
+    intention_ = pos;
+  }
+
+  uint64_t Intention() const {
+    assert(intention_);
+    return *intention_;
+  }
+
+  void SetAfterImage(uint64_t pos) {
+    assert(!afterimage_);
+    afterimage_ = pos;
+  }
+
+  uint64_t AfterImage() const {
+    assert(afterimage_);
+    return *afterimage_;
   }
 
   // serialization and fix-up
@@ -151,6 +189,9 @@ class PersistentTree {
     PersistentTree *tree_;
   };
 
+  boost::optional<uint64_t> intention_;
+  boost::optional<uint64_t> afterimage_;
+
   // access trace used to update lru cache. the trace is applied and reset
   // after each operation (e.g. get/put/etc) or if the transaction accesses
   // the cache to resolve a pointer (e.g. accessing the log).
@@ -169,8 +210,6 @@ class PersistentTree {
   //
   std::vector<SharedNodeRef> fresh_nodes_;
 
-  // TODO: so it can grab the root. this is only temporary for the parallel txn processing work.
-  friend class DBImpl;
 };
 
 }

@@ -84,6 +84,25 @@ class Intention {
     pos_ = pos;
   }
 
+  std::set<std::string> OpKeys() const {
+    std::set<std::string> keys;
+    for (auto& op : intention_.ops()) {
+      keys.insert(op.key());
+    }
+    return keys;
+  }
+
+  std::set<std::string> UpdateOpKeys() const {
+    std::set<std::string> keys;
+    for (auto& op : intention_.ops()) {
+      if (op.op() == cruzdb_proto::TransactionOp::PUT ||
+          op.op() == cruzdb_proto::TransactionOp::DELETE) {
+        keys.insert(op.key());
+      }
+    }
+    return keys;
+  }
+
  private:
   cruzdb_proto::Intention intention_;
   boost::optional<uint64_t> pos_;

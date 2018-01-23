@@ -113,12 +113,9 @@ void PersistentTree::serialize_node_ptr(cruzdb_proto::NodePtr *dst,
   if (src.ref(trace_) == Node::Nil()) {
     dst->set_nil(true);
     dst->set_self(false);
-    dst->set_csn(0);
-    dst->set_off(0);
   } else if (src.ref(trace_)->rid() == rid_) {
     dst->set_nil(false);
     dst->set_self(true);
-    dst->set_csn(0);
     dst->set_off(maybe_offset);
     // assert the offset was set correctly during infection.
     assert(src.Address());
@@ -131,14 +128,18 @@ void PersistentTree::serialize_node_ptr(cruzdb_proto::NodePtr *dst,
     dst->set_nil(false);
     dst->set_self(false);
 
-    // it might make more sense to move this serialization work into the node
-    // cache, which is where the intention mapping lives anyway.
-    uint64_t position = address->Position();
-    if (!address->IsAfterImage()) {
-      position = db_->IntentionToAfterImage(position);
+    if (address->IsAfterImage()) {
+      dst->set_afterimage(address->Position());
+    } else {
+      const auto i_pos = address->Position();
+      const auto ai_pos = db_->IntentionToAfterImage(i_pos);
+      if (ai_pos) {
+        dst->set_afterimage(*ai_pos);
+      } else {
+        dst->set_intention(i_pos);
+      }
     }
 
-    dst->set_csn(position);
     dst->set_off(address->Offset());
   }
 }
@@ -184,8 +185,6 @@ void PersistentTree::SerializeAfterImage(cruzdb_proto::AfterImage& i,
     uint64_t intention,
     std::vector<SharedNodeRef>& delta)
 {
-  //assert(committed_);
-
   int field_index = 0;
   assert(root_ != nullptr);
   if (root_ == Node::Nil()) {

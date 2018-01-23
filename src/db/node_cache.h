@@ -56,10 +56,14 @@ class NodeCache {
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
       boost::optional<NodeAddress>& address);
 
-  uint64_t IntentionToAfterImage(uint64_t intention_pos) {
+  boost::optional<uint64_t> IntentionToAfterImage(uint64_t intention_pos) {
     std::lock_guard<std::mutex> l(lock_);
-    assert(!intention_map_.empty());
-    return intention_map_.at(intention_pos);
+    auto it = intention_map_.find(intention_pos);
+    if (it == intention_map_.end()) {
+      return boost::none;
+    } else {
+      return it->second;
+    }
   }
 
   void SetIntentionMapping(uint64_t intention_pos,

@@ -4,12 +4,12 @@ package cruzdb_proto;
 
 option optimize_for = SPEED;
 
-// TODO: updating names (eg csn)
 message NodePtr {
     required bool nil = 1;
     required bool self = 2;
-    required uint64 csn = 3;
-    required uint32 off = 4;
+    optional uint64 intention  = 3;
+    optional uint64 afterimage = 4;
+    optional uint32 off = 5;
 }
 
 message Node {

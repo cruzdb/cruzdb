@@ -22,11 +22,12 @@ void EntryService::Stop()
     stop_ = true;
   }
 
+  ai_matcher.shutdown();
+
   for (auto& q : intention_queues_) {
     q->Stop();
   }
 
-  pending_after_images_cond_.notify_one();
   log_reader_.join();
   intention_reader_.join();
 }
@@ -203,15 +204,11 @@ void EntryService::Run()
     // something like pushing a pointer onto these lists, or using move
     // semantics.
     switch (entry.type()) {
-      case cruzdb_proto::LogEntry::INTENTION:
+      case cruzdb_proto::LogEntry::AFTER_IMAGE:
+        ai_matcher.push(entry.after_image(), pos_);
         break;
 
-      case cruzdb_proto::LogEntry::AFTER_IMAGE:
-        {
-          std::lock_guard<std::mutex> lk(*db_lock_);
-          pending_after_images_.emplace_back(pos_, entry.after_image());
-        }
-        pending_after_images_cond_.notify_one();
+      case cruzdb_proto::LogEntry::INTENTION:
         break;
 
       default:
@@ -273,6 +270,134 @@ void EntryService::IntentionQueue::Push(Intention intention)
   pos_ = intention.Position() + 1;
   q_.emplace(intention);
   cond_.notify_one();
+}
+
+std::list<Intention>
+EntryService::ReadIntentions(std::vector<uint64_t> addrs)
+{
+  std::list<Intention> intentions;
+  assert(!addrs.empty());
+  for (auto pos : addrs) {
+    std::string data;
+    int ret = log_->Read(pos, &data);
+    assert(ret == 0);
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+    assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
+    intentions.emplace_back(Intention(entry.intention(), pos));
+  }
+  return intentions;
+}
+
+EntryService::PrimaryAfterImageMatcher::PrimaryAfterImageMatcher() :
+  shutdown_(false),
+  matched_watermark_(0)
+{
+}
+
+void EntryService::PrimaryAfterImageMatcher::watch(
+    std::vector<SharedNodeRef> delta,
+    std::unique_ptr<PersistentTree> intention)
+{
+  std::lock_guard<std::mutex> lk(lock_);
+
+  const auto ipos = intention->Intention();
+
+  auto it = afterimages_.find(ipos);
+  if (it == afterimages_.end()) {
+    afterimages_.emplace(ipos,
+        PrimaryAfterImage{boost::none,
+        std::move(intention),
+        std::move(delta)});
+  } else {
+    assert(it->second.pos);
+    assert(!it->second.tree);
+    intention->SetAfterImage(*it->second.pos);
+    it->second.pos = boost::none;
+    matched_.emplace_back(std::make_pair(std::move(delta),
+        std::move(intention)));
+    cond_.notify_one();
+  }
+
+  gc();
+}
+
+void EntryService::PrimaryAfterImageMatcher::push(
+    const cruzdb_proto::AfterImage& ai, uint64_t pos)
+{
+  std::lock_guard<std::mutex> lk(lock_);
+
+  const auto ipos = ai.intention();
+  if (ipos <= matched_watermark_) {
+    return;
+  }
+
+  auto it = afterimages_.find(ipos);
+  if (it == afterimages_.end()) {
+    afterimages_.emplace(ipos, PrimaryAfterImage{pos, nullptr, {}});
+  } else if (!it->second.pos && it->second.tree) {
+    assert(it->second.tree->Intention() == ipos);
+    it->second.tree->SetAfterImage(pos);
+    matched_.emplace_back(std::make_pair(std::move(it->second.delta),
+        std::move(it->second.tree)));
+    cond_.notify_one();
+  }
+
+  gc();
+}
+
+std::pair<std::vector<SharedNodeRef>,
+  std::unique_ptr<PersistentTree>>
+EntryService::PrimaryAfterImageMatcher::match()
+{
+  std::unique_lock<std::mutex> lk(lock_);
+
+  cond_.wait(lk, [&] { return !matched_.empty() || shutdown_; });
+
+  if (shutdown_) {
+    return std::make_pair(std::vector<SharedNodeRef>(), nullptr);
+  }
+
+  assert(!matched_.empty());
+
+  auto tree = std::move(matched_.front());
+  matched_.pop_front();
+
+  return std::move(tree);
+}
+
+void EntryService::PrimaryAfterImageMatcher::shutdown()
+{
+  std::lock_guard<std::mutex> l(lock_);
+  shutdown_ = true;
+  cond_.notify_one();
+}
+
+void EntryService::PrimaryAfterImageMatcher::gc()
+{
+  auto it = afterimages_.begin();
+  while (it != afterimages_.end()) {
+    auto ipos = it->first;
+    assert(matched_watermark_ < ipos);
+    auto& pai = it->second;
+    if (!pai.pos && !pai.tree) {
+      matched_watermark_ = ipos;
+      it = afterimages_.erase(it);
+    } else {
+      // as long as the watermark is positioned such that no unmatched intention
+      // less than the water is in the index, then gc could move forward and
+      // continue removing matched entries.
+      break;
+    }
+  }
+}
+
+void EntryService::AppendAfterImageAsync(const std::string& blob)
+{
+  uint64_t afterimage_pos;
+  int ret = log_->Append(blob, &afterimage_pos);
+  assert(ret == 0);
 }
 
 }

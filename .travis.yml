@@ -20,24 +20,24 @@ services:
 #   # COVERITY_SCAN_TOKEN
 #   - secure: "EhSojL5dZ7LY9S59Iixzw8KUtMqVdE8dZTZqZ0gnA1VfG4XcQr8u8Vi9jJzGaGxcXIL10p3nE4whrmhlEhUpxKkrcOgKo9vKmn9xByUHd0CBhBudZAdlQsq4DMEp20qAwg+5iuCUHS6cn3UjduQqdo9YMhfqFuRiH+U3oZxS0W4="
 
-addons:
-  apt:
-    sources:
-      - llvm-toolchain-trusty
-      - ubuntu-toolchain-r-test
-    packages:
-      - clang-6.0
-      - g++-7
-      - gcc-7
+#addons:
+#  apt:
+#    sources:
+#      - llvm-toolchain-trusty
+#      - ubuntu-toolchain-r-test
+#    packages:
+#      - clang-6.0
+#      - g++-7
+#      - gcc-7
 
 #- os: linux
 #- env: DOCKER_IMAGE=debian:stretch
+#    - os: linux
+#      compiler: gcc
+#    - os: linux
+#      compiler: clang
 matrix:
   include:
-    - os: linux
-      compiler: gcc
-    - os: linux
-      compiler: clang
     - os: linux
       env: DOCKER_IMAGE=centos:7
     - os: linux
@@ -56,14 +56,14 @@ matrix:
       env: OSX_BUILD=1
   allow_failures:
     - os: osx
+    - os: linux
+      env: DOCKER_IMAGE=centos:7
 
 # the coverity build runs in the standard travis environment (job config #1
 # from the build matrix) and needs to have the proper dependencies installed.
 # all other job configurations only run ci/script.sh below which will handle
 # dependency installation.
 before_install:
-  - export CC=gcc-7
-  - export CXX=g++-7
   - if [ $TRAVIS_BRANCH == coverity_scan ] && [ ${TRAVIS_JOB_NUMBER##*.} == 1 ]; then \
       ./ci/install-zlog-deps.sh && ./ci/install-zlog.sh && ./install-deps.sh; fi
   - if [ $TRAVIS_BRANCH == coverity_scan ] && [ ${TRAVIS_JOB_NUMBER##*.} != 1 ]; then exit 0; fi

@@ -67,7 +67,7 @@ class DBImpl : public DB {
   // caching
  public:
   void UpdateLRU(std::vector<NodeAddress>& trace);
-  uint64_t IntentionToAfterImage(uint64_t intention_pos);
+  boost::optional<uint64_t> IntentionToAfterImage(uint64_t intention_pos);
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
       boost::optional<NodeAddress>& address);
 
@@ -137,13 +137,9 @@ class DBImpl : public DB {
   };
 
   void NotifyIntention(uint64_t pos);
-  void TransactionProcessor();
   bool ProcessConcurrentIntention(const Intention& intention);
   void NotifyTransaction(int64_t token, uint64_t intention_pos, bool committed);
   void ReplayIntention(PersistentTree *tree, const Intention& intention);
-
- private:
-  void TransactionWriter();
 
  private:
   std::mutex lock_;
@@ -153,8 +149,8 @@ class DBImpl : public DB {
 
   EntryService entry_service_;
 
-  std::list<std::pair<uint64_t, std::unique_ptr<PersistentTree>>> unwritten_roots_;
-  std::condition_variable unwritten_roots_cond_;
+  std::list<std::unique_ptr<PersistentTree>> lcs_trees_;
+  std::condition_variable lcs_trees_cond_;
 
   TransactionFinder txn_finder_;
   std::map<uint64_t, std::pair<std::condition_variable*, bool*>> waiting_on_log_entry_;
@@ -183,11 +179,15 @@ class DBImpl : public DB {
   NodePtr root_;
   uint64_t root_snapshot_;
 
-  std::thread txn_writer_;
-  std::thread txn_processor_;
+  void TransactionProcessorEntry();
+  std::thread transaction_processor_thread_;
 
-  // handles various clean-up tasks. useful for absorbing potentially high
-  // latency memory freeing events.
+  void AfterImageWriterEntry();
+  std::thread afterimage_writer_thread_;
+
+  void AfterImageFinalizerEntry();
+  std::thread afterimage_finalizer_thread_;
+
   void JanitorEntry();
   std::condition_variable janitor_cond_;
   std::thread janitor_thread_;
