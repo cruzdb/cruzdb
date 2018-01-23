@@ -462,7 +462,7 @@ void DBImpl::AfterImageWriterEntry()
       assert(entry.SerializeToString(&blob));
       entry.release_after_image();
 
-      entry_service_.ai_matcher.watch(std::move(tree));
+      entry_service_.ai_matcher.watch(std::move(delta), std::move(tree));
 
       // in its current form, this isn't actually async because there is very
       // little, if any, benefit from actual AIO with the LMDB/RAM backends. for
@@ -479,28 +479,24 @@ void DBImpl::AfterImageWriterEntry()
 void DBImpl::AfterImageFinalizerEntry()
 {
   while (true) {
-    auto tree = entry_service_.ai_matcher.match();
-    if (!tree)
+    auto tree_info = entry_service_.ai_matcher.match();
+    if (!tree_info.second)
       break;
+
+    auto& delta = tree_info.first;
+    auto& tree = tree_info.second;
 
     auto ipos = tree->Intention();
     auto ai_pos = tree->AfterImage();
-
-    std::vector<SharedNodeRef> delta;
-    {
-      cruzdb_proto::AfterImage after_image;
-      tree->SerializeAfterImage(after_image, ipos, delta);
-      assert(after_image.intention() == ipos);
-    }
-
-    std::unique_lock<std::mutex> lk(lock_);
-    if (stop_)
-      break;
 
     assert(ipos < ai_pos);
     tree->SetDeltaPosition(delta, ai_pos);
     cache_.SetIntentionMapping(ipos, ai_pos);
     cache_.ApplyAfterImageDelta(delta, ai_pos);
+
+    std::unique_lock<std::mutex> lk(lock_);
+    if (stop_)
+      break;
   }
 }
 

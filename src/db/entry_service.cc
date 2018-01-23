@@ -297,6 +297,7 @@ EntryService::PrimaryAfterImageMatcher::PrimaryAfterImageMatcher() :
 }
 
 void EntryService::PrimaryAfterImageMatcher::watch(
+    std::vector<SharedNodeRef> delta,
     std::unique_ptr<PersistentTree> intention)
 {
   std::lock_guard<std::mutex> lk(lock_);
@@ -306,13 +307,16 @@ void EntryService::PrimaryAfterImageMatcher::watch(
   auto it = afterimages_.find(ipos);
   if (it == afterimages_.end()) {
     afterimages_.emplace(ipos,
-        PrimaryAfterImage{boost::none, std::move(intention)});
+        PrimaryAfterImage{boost::none,
+        std::move(intention),
+        std::move(delta)});
   } else {
     assert(it->second.pos);
     assert(!it->second.tree);
     intention->SetAfterImage(*it->second.pos);
     it->second.pos = boost::none;
-    matched_.emplace_back(std::move(intention));
+    matched_.emplace_back(std::make_pair(std::move(delta),
+        std::move(intention)));
     cond_.notify_one();
   }
 
@@ -331,18 +335,20 @@ void EntryService::PrimaryAfterImageMatcher::push(
 
   auto it = afterimages_.find(ipos);
   if (it == afterimages_.end()) {
-    afterimages_.emplace(ipos, PrimaryAfterImage{pos, nullptr});
+    afterimages_.emplace(ipos, PrimaryAfterImage{pos, nullptr, {}});
   } else if (!it->second.pos && it->second.tree) {
     assert(it->second.tree->Intention() == ipos);
     it->second.tree->SetAfterImage(pos);
-    matched_.emplace_back(std::move(it->second.tree));
+    matched_.emplace_back(std::make_pair(std::move(it->second.delta),
+        std::move(it->second.tree)));
     cond_.notify_one();
   }
 
   gc();
 }
 
-std::unique_ptr<PersistentTree>
+std::pair<std::vector<SharedNodeRef>,
+  std::unique_ptr<PersistentTree>>
 EntryService::PrimaryAfterImageMatcher::match()
 {
   std::unique_lock<std::mutex> lk(lock_);
@@ -350,7 +356,7 @@ EntryService::PrimaryAfterImageMatcher::match()
   cond_.wait(lk, [&] { return !matched_.empty() || shutdown_; });
 
   if (shutdown_) {
-    return nullptr;
+    return std::make_pair(std::vector<SharedNodeRef>(), nullptr);
   }
 
   assert(!matched_.empty());

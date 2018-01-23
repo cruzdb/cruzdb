@@ -95,13 +95,16 @@ class EntryService {
     // the GC process know that no new intention watches will be added. since we
     // are adding the intentions in strict log order, then for any point in the
     // index we know that below that point the index is complete.
-    void watch(std::unique_ptr<PersistentTree> intention);
+    void watch(std::vector<SharedNodeRef> delta,
+        std::unique_ptr<PersistentTree> intention);
 
     // add an afterimage from the log
     void push(const cruzdb_proto::AfterImage& ai, uint64_t pos);
 
     // get intention/afterimage match
-    std::unique_ptr<PersistentTree> match();
+    std::pair<
+      std::vector<SharedNodeRef>,
+      std::unique_ptr<PersistentTree>> match();
 
     // notify stream consumers
     void shutdown();
@@ -113,6 +116,7 @@ class EntryService {
     struct PrimaryAfterImage {
       boost::optional<uint64_t> pos;
       std::unique_ptr<PersistentTree> tree;
+      std::vector<SharedNodeRef> delta;
     };
 
     // gc the dedup index
@@ -128,7 +132,8 @@ class EntryService {
     std::map<uint64_t, PrimaryAfterImage> afterimages_;
 
     // intentions matched with primary after image
-    std::list<std::unique_ptr<PersistentTree>> matched_;
+    std::list<std::pair<std::vector<SharedNodeRef>,
+      std::unique_ptr<PersistentTree>>> matched_;
   };
 
   PrimaryAfterImageMatcher ai_matcher;
