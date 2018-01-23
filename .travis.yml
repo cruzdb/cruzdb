@@ -56,6 +56,8 @@ matrix:
       env: OSX_BUILD=1
   allow_failures:
     - os: osx
+    - os: linux
+      env: DOCKER_IMAGE=centos:7
 
 # the coverity build runs in the standard travis environment (job config #1
 # from the build matrix) and needs to have the proper dependencies installed.
