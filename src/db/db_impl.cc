@@ -38,7 +38,7 @@ DBImpl::~DBImpl()
 
   entry_service_.Stop();
 
-  unwritten_roots_cond_.notify_one();
+  lcs_trees_cond_.notify_one();
 
   transaction_processor_thread_.join();
   afterimage_writer_thread_.join();
@@ -419,7 +419,7 @@ void DBImpl::TransactionProcessorEntry()
     last_intention_processed_ = intention_pos;
 
     lcs_trees_.emplace_back(std::move(next_root));
-    unwritten_roots_cond_.notify_one();
+    lcs_trees_cond_.notify_one();
 
     NotifyTransaction(intention->Token(), intention_pos, true);
   }
@@ -427,31 +427,26 @@ void DBImpl::TransactionProcessorEntry()
   std::cerr << "transaction processor exiting" << std::endl;
 }
 
+// asynchronously dispatch after image serializations to the log
+// TODO:
+//  - throttle
+//  - parallel serialization
+//  - no multi-client writer policy
 void DBImpl::AfterImageWriterEntry()
 {
+  std::unique_lock<std::mutex> lk(lock_);
   while (true) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    std::unique_lock<std::mutex> lk(lock_);
-
-    if (!unwritten_roots_cond_.wait_for(lk, std::chrono::seconds(10),
-          [&] { return !lcs_trees_.empty() || stop_; })) {
-      std::cout << "tw: no unwritten root produced for 2 seconds" << std::endl;
-      continue;
-    }
+    lcs_trees_cond_.wait(lk, [&] {
+        return !lcs_trees_.empty() || stop_; });
 
     if (stop_)
       break;
 
-    std::vector<std::pair<std::string, std::unique_ptr<PersistentTree>>> trees;
-    for (auto& tree : lcs_trees_) {
-      trees.emplace_back("", std::move(tree));
-    }
-    lcs_trees_.clear();
-
+    std::list<std::unique_ptr<PersistentTree>> trees;
+    trees.swap(lcs_trees_);
     lk.unlock();
 
-    for (auto& tree_info : trees) {
-      auto tree = std::move(tree_info.second);
+    for (auto& tree : trees) {
       const auto intention_pos = tree->Intention();
 
       std::vector<SharedNodeRef> delta;
@@ -467,32 +462,17 @@ void DBImpl::AfterImageWriterEntry()
       assert(entry.SerializeToString(&blob));
       entry.release_after_image();
 
-      tree_info.first = blob;
-
       entry_service_.ai_matcher.watch(std::move(tree));
+
+      // in its current form, this isn't actually async because there is very
+      // little, if any, benefit from actual AIO with the LMDB/RAM backends. for
+      // for other backends the benefit is huge. other optimizations like not
+      // writing the after image if we already know about it by looking at the
+      // dedup index.
+      entry_service_.AppendAfterImageAsync(blob);
     }
 
-    // this whole copy, shuffle, loop thing is mostly to just stress out the
-    // rendezvous mechanism between this thread and the thread that adds the
-    // afterimage to the cache. once we have actual aio here, this can all be
-    // simplified / removed.
-    //
-    // note that above they are registered in log order with entry service, but
-    // then the io is random. this is consistent with how we will register
-    // directly as they pop off the queue, then dispatch aio
-    std::random_shuffle(trees.begin(), trees.end());
-
-    // ok, the serialization is done again down here to reproduce the blob. it
-    // isn't removed from above, or move here, because we need to go through and
-    // make sure that there isn't some side effects from serialization (like
-    // setting the intention on the tree before registering) as that method
-    // isn't const. in any case, it should be idempotent, so no harm, just
-    // wasteful and silly.
-    for (auto& tree_info : trees) {
-      uint64_t afterimage_pos;
-      int ret = log_->Append(tree_info.first, &afterimage_pos);
-      assert(ret == 0);
-    }
+    lk.lock();
   }
 }
 

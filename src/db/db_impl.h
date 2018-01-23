@@ -150,7 +150,7 @@ class DBImpl : public DB {
   EntryService entry_service_;
 
   std::list<std::unique_ptr<PersistentTree>> lcs_trees_;
-  std::condition_variable unwritten_roots_cond_;
+  std::condition_variable lcs_trees_cond_;
 
   TransactionFinder txn_finder_;
   std::map<uint64_t, std::pair<std::condition_variable*, bool*>> waiting_on_log_entry_;

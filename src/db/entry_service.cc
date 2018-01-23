@@ -387,4 +387,11 @@ void EntryService::PrimaryAfterImageMatcher::gc()
   }
 }
 
+void EntryService::AppendAfterImageAsync(const std::string& blob)
+{
+  uint64_t afterimage_pos;
+  int ret = log_->Append(blob, &afterimage_pos);
+  assert(ret == 0);
+}
+
 }

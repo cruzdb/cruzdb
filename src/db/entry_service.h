@@ -133,6 +133,8 @@ class EntryService {
 
   PrimaryAfterImageMatcher ai_matcher;
 
+  void AppendAfterImageAsync(const std::string& blob);
+
  private:
   void Run();
   void IntentionReader();
