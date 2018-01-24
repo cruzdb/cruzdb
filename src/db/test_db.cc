@@ -224,6 +224,9 @@ TEST(DB, EquivHistory) {
     }
     test_seek(truth_history[i], db, db_history[i]);
   }
+
+  delete db;
+  delete log;
 }
 
 TEST(DB, Iterator) {
@@ -282,6 +285,9 @@ TEST(DB, Iterator) {
 
   it->Seek("x");
   ASSERT_TRUE(!it->Valid());
+
+  delete db;
+  delete log;
 }
 
 TEST(DB, Get) {
@@ -325,6 +331,9 @@ TEST(DB, Get) {
   ASSERT_EQ(val, "b");
 
   txn->Commit();
+
+  delete db;
+  delete log;
 }
 
 TEST(DB, ReOpen) {
