@@ -5,6 +5,7 @@
 #include <iostream>
 #include <memory>
 #include <random>
+#include <cstring>
 #include <mutex>
 #include <set>
 #include <stack>
@@ -12,6 +13,8 @@
 #include <unordered_map>
 #include <vector>
 #include <boost/optional.hpp>
+#include <boost/algorithm/string/predicate.hpp>
+#include <CivetServer.h>
 
 #include <zlog/log.h>
 
@@ -33,6 +36,10 @@ class DBImpl : public DB {
     uint64_t replay_start_pos;
     uint64_t after_image_pos;
     cruzdb_proto::AfterImage after_image;
+  };
+
+  struct DBStats {
+    uint64_t transactions_started = 0;
   };
 
   // find the latest point in the log that can be used to restore a database
@@ -142,7 +149,7 @@ class DBImpl : public DB {
   void ReplayIntention(PersistentTree *tree, const Intention& intention);
 
  private:
-  std::mutex lock_;
+  mutable std::mutex lock_;
   zlog::Log *log_;
   NodeCache cache_;
   bool stop_;
@@ -160,6 +167,45 @@ class DBImpl : public DB {
   std::set<uint64_t> intention_map_;
 
  private:
+  class MetricsHandler : public CivetHandler {
+   public:
+    explicit MetricsHandler(DBImpl *db) :
+      db_(db)
+    {}
+
+    bool handleGet(CivetServer *server, struct mg_connection *conn) {
+
+      DBStats stats = db_->stats();
+
+      std::stringstream out;
+
+      writeCounter(out, "transactions_started",
+          stats.transactions_started);
+
+      std::string body = out.str();
+      std::string content_type = "text/plain";
+
+      mg_printf(conn,
+	  "HTTP/1.1 200 OK\r\n"
+	  "Content-Type: %s\r\n",
+	  content_type.c_str());
+      mg_printf(conn, "Content-Length: %lu\r\n\r\n",
+	  static_cast<unsigned long>(body.size()));
+      mg_write(conn, body.data(), body.size());
+
+      return true;
+    }
+
+   private:
+    void writeCounter(std::ostream& out, const std::string& name,
+        uint64_t value) {
+      out << "# TYPE " << name << " counter" << std::endl;
+      out << name << " " << value << std::endl;
+    }
+
+    DBImpl *db_;
+  };
+
   // finished transactions indexed by their intention position and used by the
   // transaction processor to avoid replaying serial intentions.
   class FinishedTransactions {
@@ -173,6 +219,11 @@ class DBImpl : public DB {
     std::unordered_map<uint64_t,
       std::unique_ptr<PersistentTree>> txns_;
   };
+
+  DBStats stats() const {
+    std::lock_guard<std::mutex> lk(lock_);
+    return db_stats_;
+  }
 
   FinishedTransactions finished_txns_;
 
@@ -191,6 +242,10 @@ class DBImpl : public DB {
   void JanitorEntry();
   std::condition_variable janitor_cond_;
   std::thread janitor_thread_;
+
+  CivetServer metrics_http_server_;
+  MetricsHandler metrics_handler_;
+  struct DBStats db_stats_;
 };
 
 }

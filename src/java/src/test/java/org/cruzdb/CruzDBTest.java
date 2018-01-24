@@ -20,6 +20,7 @@ public class CruzDBTest {
     Log log = Log.open("lmdb", opts, logname);
 
     CruzDB db = CruzDB.open(log, true);
+    db.dispose();
   }
 
   @Test
@@ -34,6 +35,8 @@ public class CruzDBTest {
     CruzDB db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value".getBytes());
     assertArrayEquals(db.get("key1".getBytes()), "value".getBytes());
+
+    db.dispose();
   }
 
   @Test
@@ -72,6 +75,8 @@ public class CruzDBTest {
     assertThat(iterator.value()).isEqualTo("value2".getBytes());
     iterator.next();
     assertThat(iterator.isValid()).isFalse();
+
+    db.dispose();
   }
 
   @Test
@@ -90,5 +95,7 @@ public class CruzDBTest {
     Transaction txn = db.newTransaction();
     byte[] value = txn.get("key1".getBytes());
     txn.commit();
+
+    db.dispose();
   }
 }

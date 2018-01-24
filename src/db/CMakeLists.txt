@@ -1,4 +1,4 @@
-PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS cruzdb.proto)
+PROTOBUF_GENERATE_CPP(DB_PROTO_SRCS DB_PROTO_HDRS cruzdb.proto)
 
 include_directories(${ZLOG_INCLUDE_DIRS})
 
@@ -11,9 +11,12 @@ add_library(cruzdb SHARED
   persistent_tree.cc
   db.cc
   entry_service.cc
-  ${PROTO_SRCS})
+  ${DB_PROTO_SRCS}
+  ../civetweb/src/civetweb.c
+  ../civetweb/src/CivetServer.cpp)
 target_include_directories(cruzdb
-  PUBLIC ${PROTOBUF_INCLUDE_DIR})
+  PUBLIC ${PROTOBUF_INCLUDE_DIR}
+  PUBLIC "${CMAKE_SOURCE_DIR}/src/civetweb/include")
 target_link_libraries(cruzdb
   ${ZLOG_LIBRARIES}
   ${PROTOBUF_LIBRARIES})

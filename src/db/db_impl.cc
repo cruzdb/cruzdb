@@ -11,7 +11,9 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   entry_service_(log, point.replay_start_pos, &lock_),
   intention_queue_(entry_service_.NewIntentionQueue(point.replay_start_pos)),
   in_flight_txn_rid_(-1),
-  root_(Node::Nil(), this)
+  root_(Node::Nil(), this),
+  metrics_http_server_({"listening_ports", "0.0.0.0:8080", "num_threads", "1"}),
+  metrics_handler_(this)
 {
   auto root = cache_.CacheAfterImage(point.after_image, point.after_image_pos);
   root_.replace(root);
@@ -24,6 +26,8 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   afterimage_finalizer_thread_ = std::thread(&DBImpl::AfterImageFinalizerEntry, this);
 
   janitor_thread_ = std::thread(&DBImpl::JanitorEntry, this);
+
+  metrics_http_server_.addHandler("/metrics", &metrics_handler_);
 }
 
 DBImpl::~DBImpl()
@@ -45,6 +49,9 @@ DBImpl::~DBImpl()
   afterimage_finalizer_thread_.join();
 
   cache_.Stop();
+
+  metrics_http_server_.removeHandler("/metrics");
+  metrics_http_server_.close();
 }
 
 Snapshot *DBImpl::GetSnapshot()
@@ -226,6 +233,7 @@ int DBImpl::Get(const zlog::Slice& key, std::string *value)
 Transaction *DBImpl::BeginTransaction()
 {
   std::lock_guard<std::mutex> lk(lock_);
+  db_stats_.transactions_started++;
   return new TransactionImpl(this,
       root_,
       root_snapshot_,
