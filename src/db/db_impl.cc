@@ -67,7 +67,7 @@ void DBImpl::ReleaseSnapshot(Snapshot *snapshot)
 
 Iterator *DBImpl::NewIterator(Snapshot *snapshot)
 {
-  return new IteratorImpl(snapshot);
+  return new FilteredPrefixIteratorImpl(PREFIX_USER, snapshot);
 }
 
 int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
@@ -323,12 +323,12 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
 
       case cruzdb_proto::TransactionOp::PUT:
         assert(op.has_val());
-        tree->Put(op.key(), op.val());
+        tree->Put(PREFIX_USER, op.key(), op.val());
         break;
 
       case cruzdb_proto::TransactionOp::DELETE:
         assert(!op.has_val());
-        tree->Delete(op.key());
+        tree->Delete(PREFIX_USER, op.key());
         break;
 
       default:

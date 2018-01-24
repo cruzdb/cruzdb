@@ -7,6 +7,8 @@
 
 namespace cruzdb {
 
+const std::string PREFIX_USER = "U";
+
 /**
  * rid: this value uniquely identifies a tree delta (a root plus any nodes
  * creates through tree modifications within a single context). tree deltas are
@@ -63,9 +65,19 @@ class PersistentTree {
   PersistentTree& operator=(const PersistentTree&& other) = delete;
 
  public:
-  void Put(const zlog::Slice& key, const zlog::Slice& value);
-  void Delete(const zlog::Slice& key);
-  int Get(const zlog::Slice& key, std::string *value);
+  void Put(const std::string& prefix, const zlog::Slice& key,
+      const zlog::Slice& value) {
+    Put(prefix_string(prefix, key.ToString()), value);
+  }
+
+  void Delete(const std::string& prefix, const zlog::Slice& key) {
+    Delete(prefix_string(prefix, key.ToString()));
+  }
+
+  int Get(const std::string& prefix, const zlog::Slice& key,
+      std::string *value) {
+    return Get(prefix_string(prefix, key.ToString()), value);
+  }
 
   bool ReadOnly() const {
     return root_ == nullptr;
@@ -125,6 +137,18 @@ class PersistentTree {
 
   // tree management
  private:
+  static std::string prefix_string(const std::string& prefix,
+      const std::string& value) {
+    auto out = prefix;
+    out.push_back(0);
+    out.append(value);
+    return out;
+  }
+
+  void Put(const zlog::Slice& key, const zlog::Slice& value);
+  void Delete(const zlog::Slice& key);
+  int Get(const zlog::Slice& key, std::string *value);
+
   static inline NodePtr& left(SharedNodeRef n) { return n->left; };
   static inline NodePtr& right(SharedNodeRef n) { return n->right; };
 

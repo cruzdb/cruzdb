@@ -1,4 +1,5 @@
 #pragma once
+#include <cstring>
 #include <stack>
 #include <zlog/slice.h>
 #include "cruzdb/iterator.h"
@@ -7,9 +8,9 @@
 
 namespace cruzdb {
 
-class IteratorImpl : public Iterator {
+class RawIteratorImpl : public Iterator {
  public:
-  IteratorImpl(Snapshot *snapshot);
+  RawIteratorImpl(Snapshot *snapshot);
 
   // An iterator is either positioned at a key/value pair, or
   // not valid.  This method returns true iff the iterator is valid.
@@ -85,6 +86,70 @@ class IteratorImpl : public Iterator {
   std::stack<SharedNodeRef> stack_; // curr or unvisited parents
   Snapshot *snapshot_;
   Direction dir;
+};
+
+class PrefixRawIteratorImpl : public RawIteratorImpl {
+ public:
+  PrefixRawIteratorImpl(const std::string& prefix, Snapshot *snapshot) :
+    RawIteratorImpl(snapshot),
+    prefix_(prefix)
+  {}
+
+  bool Valid() const override {
+    if (!RawIteratorImpl::Valid()) {
+      return false;
+    }
+    zlog::Slice key = RawIteratorImpl::key();
+    if (key.size() > prefix_.length() && key[prefix_.length()] == '\0') {
+      return std::memcmp(key.data(), prefix_.c_str(), prefix_.length()) == 0;
+    } else {
+      return false;
+    }
+  }
+
+  void SeekToFirst() override {
+    RawIteratorImpl::Seek(prefix_);
+  }
+
+  void SeekToLast() override {
+    std::string past = prefix_;
+    past.push_back(1);
+    RawIteratorImpl::Seek(past);
+    if (Valid()) {
+      Prev();
+    } else {
+      RawIteratorImpl::SeekToLast();
+    }
+  }
+
+  void Seek(const zlog::Slice& target) override {
+    RawIteratorImpl::Seek(prefix_string(prefix_, target.ToString()));
+  }
+
+ protected:
+  const std::string prefix_;
+
+ private:
+  static std::string prefix_string(const std::string& prefix,
+      const std::string& value) {
+    auto out = prefix;
+    out.push_back(0);
+    out.append(value);
+    return out;
+  }
+};
+
+class FilteredPrefixIteratorImpl : public PrefixRawIteratorImpl {
+ public:
+  FilteredPrefixIteratorImpl(const std::string& prefix, Snapshot *snapshot) :
+    PrefixRawIteratorImpl(prefix, snapshot)
+  {}
+
+  zlog::Slice key() const override {
+    zlog::Slice key = PrefixRawIteratorImpl::key();
+    key.remove_prefix(prefix_.size() + 1);
+    return key;
+  }
 };
 
 }

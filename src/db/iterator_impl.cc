@@ -19,17 +19,17 @@ class IteratorTraceApplier {
   DBImpl *db_;
 };
 
-IteratorImpl::IteratorImpl(Snapshot *snapshot) :
+RawIteratorImpl::RawIteratorImpl(Snapshot *snapshot) :
   snapshot_(snapshot)
 {
 }
 
-bool IteratorImpl::Valid() const
+bool RawIteratorImpl::Valid() const
 {
   return !stack_.empty();
 }
 
-void IteratorImpl::SeekToFirst()
+void RawIteratorImpl::SeekToFirst()
 {
   IteratorTraceApplier ta(snapshot_->db);
 
@@ -47,7 +47,7 @@ void IteratorImpl::SeekToFirst()
   dir = Forward;
 }
 
-void IteratorImpl::SeekToLast()
+void RawIteratorImpl::SeekToLast()
 {
   IteratorTraceApplier ta(snapshot_->db);
 
@@ -65,7 +65,7 @@ void IteratorImpl::SeekToLast()
   dir = Reverse;
 }
 
-void IteratorImpl::Seek(const zlog::Slice& key)
+void RawIteratorImpl::Seek(const zlog::Slice& key)
 {
   IteratorTraceApplier ta(snapshot_->db);
 
@@ -94,7 +94,7 @@ void IteratorImpl::Seek(const zlog::Slice& key)
   dir = Forward;
 }
 
-void IteratorImpl::SeekForward(const zlog::Slice& key)
+void RawIteratorImpl::SeekForward(const zlog::Slice& key)
 {
   IteratorTraceApplier ta(snapshot_->db);
 
@@ -123,7 +123,7 @@ void IteratorImpl::SeekForward(const zlog::Slice& key)
   dir = Forward;
 }
 
-void IteratorImpl::SeekPrevious(const zlog::Slice& key)
+void RawIteratorImpl::SeekPrevious(const zlog::Slice& key)
 {
   IteratorTraceApplier ta(snapshot_->db);
 
@@ -153,16 +153,16 @@ void IteratorImpl::SeekPrevious(const zlog::Slice& key)
   dir = Reverse;
 }
 
-void IteratorImpl::Next()
+void RawIteratorImpl::Next()
 {
   IteratorTraceApplier ta(snapshot_->db);
 
-  assert(Valid());
+  assert(!stack_.empty());
   if (dir == Reverse) {
-    SeekForward(key());
+    SeekForward(RawIteratorImpl::key());
     assert(dir == Forward);
   }
-  assert(Valid());
+  assert(!stack_.empty());
   SharedNodeRef node = stack_.top()->right.ref(ta.trace);
   stack_.pop();
   while (node != Node::Nil()) {
@@ -171,16 +171,16 @@ void IteratorImpl::Next()
   }
 }
 
-void IteratorImpl::Prev()
+void RawIteratorImpl::Prev()
 {
   IteratorTraceApplier ta(snapshot_->db);
 
-  assert(Valid());
+  assert(!stack_.empty());
   if (dir == Forward) {
-    SeekPrevious(key());
+    SeekPrevious(RawIteratorImpl::key());
     assert(dir == Reverse);
   }
-  assert(Valid());
+  assert(!stack_.empty());
   SharedNodeRef node = stack_.top()->left.ref(ta.trace);
   stack_.pop();
   while (node != Node::Nil()) {
@@ -189,16 +189,16 @@ void IteratorImpl::Prev()
   }
 }
 
-zlog::Slice IteratorImpl::key() const
+zlog::Slice RawIteratorImpl::key() const
 {
-  assert(Valid());
+  assert(!stack_.empty());
   return zlog::Slice(stack_.top()->key().data(),
       stack_.top()->key().size());
 }
 
-zlog::Slice IteratorImpl::value() const
+zlog::Slice RawIteratorImpl::value() const
 {
-  assert(Valid());
+  assert(!stack_.empty());
   return zlog::Slice(stack_.top()->val().data(),
       stack_.top()->val().size());
 }

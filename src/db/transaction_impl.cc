@@ -26,7 +26,7 @@ int TransactionImpl::Get(const zlog::Slice& key, std::string *value)
   assert(!committed_);
 
   intention_->Get(key);
-  return tree_->Get(key, value);
+  return tree_->Get(PREFIX_USER, key, value);
 }
 
 void TransactionImpl::Put(const zlog::Slice& key, const zlog::Slice& value)
@@ -36,7 +36,7 @@ void TransactionImpl::Put(const zlog::Slice& key, const zlog::Slice& value)
   assert(!committed_);
 
   intention_->Put(key, value);
-  tree_->Put(key, value);
+  tree_->Put(PREFIX_USER, key, value);
 }
 
 void TransactionImpl::Delete(const zlog::Slice& key)
@@ -46,7 +46,7 @@ void TransactionImpl::Delete(const zlog::Slice& key)
   assert(!committed_);
 
   intention_->Delete(key);
-  tree_->Delete(key);
+  tree_->Delete(PREFIX_USER, key);
 }
 
 bool TransactionImpl::Commit()
