@@ -148,6 +148,61 @@ class DBImpl : public DB {
   void NotifyTransaction(int64_t token, uint64_t intention_pos, bool committed);
   void ReplayIntention(PersistentTree *tree, const Intention& intention);
 
+  // committed intention position cache. this is used by the transaction
+  // processor to look-up the position of intentions in a conflict zone. for
+  // zones that begin "not too far" in the past, a cache hit is expected. for
+  // zones that begin outside the range of the cache, query the database
+  // catalog. an lru approach can be taken to integrate intention positions, but
+  // the granularity of eviction should be complete ranges rather than indvidual
+  // positions that would create a sparse index.
+  class CommittedIntentionIndex {
+   public:
+    void push(uint64_t pos) {
+      auto ret = index_.emplace(pos);
+      assert(ret.second);
+      assert(++ret.first == index_.end());
+      if (index_.size() > limit_) {
+        index_.erase(index_.begin());
+      }
+    }
+
+    // (first, last] or [X<first, last]
+    auto range(uint64_t first, uint64_t last) {
+      assert(first < last);
+
+      if (index_.empty()) {
+        return std::make_pair(std::vector<uint64_t>{{last}}, false);
+      }
+
+      // oldest position >= first
+      auto it = index_.lower_bound(first);
+      assert(it != index_.end());
+
+      bool complete;
+      if (*it == first) {
+        std::next(it);
+        complete = true;
+      } else {
+        // the range (first, *it] is unknown
+        complete = false;
+      }
+
+      auto it2 = index_.find(last);
+      assert(it2 != index_.end());
+
+      std::vector<uint64_t> res;
+      std::copy(it, std::next(it2), std::back_inserter(res));
+
+      return std::make_pair(res, complete);
+    }
+
+   private:
+    const size_t limit_ = 1000;
+    std::set<uint64_t> index_;
+  };
+
+  CommittedIntentionIndex committed_intentions_;
+
  private:
   mutable std::mutex lock_;
   zlog::Log *log_;
@@ -164,7 +219,6 @@ class DBImpl : public DB {
   EntryService::IntentionQueue *intention_queue_;
   uint64_t last_intention_processed_;
   int64_t in_flight_txn_rid_;
-  std::set<uint64_t> intention_map_;
 
  private:
   class MetricsHandler : public CivetHandler {

@@ -272,56 +272,33 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
   // set of keys read or written by the intention
   auto intention_keys = intention.OpKeys();
 
-  // retrieve all of the intentions in the conflict zone.
-  std::vector<uint64_t> intentions_from_index;
-  {
-    auto snapshot = intention.Snapshot();
-    assert(snapshot < root_snapshot_);
-
-    auto first = intention_map_.find(snapshot);
-    assert(first != intention_map_.end());
-
-    auto last = intention_map_.find(root_snapshot_);
-    assert(last != intention_map_.end());
-
-    // converts [first, last) to (first, last] since the snapshot is not in the
-    // conflict zone, and root_snapshot_ is.
-    std::copy(std::next(first),
-        std::next(last), std::back_inserter(intentions_from_index));
-  }
-
-  std::vector<uint64_t> intentions;
-  {
-    // TODO: usually we lock to read root...
-    Snapshot snap(this, root_);
-    auto snapshot = intention.Snapshot();
+  const auto snapshot = intention.Snapshot();
+  auto irange = committed_intentions_.range(snapshot, root_snapshot_);
+  if (!irange.second) {
+    Snapshot snap(this, root_); // TODO: lock to read root_?
     FilteredPrefixIteratorImpl it(PREFIX_COMMITTED_INTENTION, &snap);
 
-    // seek to one past snapshot
-    {
-      std::stringstream key;
-      key << std::setw(20) << std::setfill('0') << snapshot;
-      it.Seek(key.str());
-    }
+    std::stringstream key;
+    key << std::setw(20) << std::setfill('0') << snapshot;
+
+    it.Seek(key.str());
     assert(it.Valid());
     assert(boost::lexical_cast<uint64_t>(it.key().ToString()) == snapshot);
+
     it.Next();
     assert(it.Valid());
 
-    // accumulate intentions up to and including lcs
     while (it.Valid()) {
       auto key = it.key();
       auto pos = boost::lexical_cast<uint64_t>(key.ToString());
-      intentions.push_back(pos);
-      if (pos == root_snapshot_)
+      if (pos == irange.first.front())
         break;
+      irange.first.emplace_back(pos);
       it.Next();
     }
-    assert(intentions.back() == root_snapshot_);
-    assert(intentions == intentions_from_index);
   }
 
-  auto other_intentions = entry_service_.ReadIntentions(intentions);
+  auto other_intentions = entry_service_.ReadIntentions(irange.first);
 
   for (auto& other_intention : other_intentions) {
     // set of keys modified by the intention in the conflict zone
@@ -402,14 +379,7 @@ void DBImpl::TransactionProcessorEntry()
       continue;
     }
 
-    // TODO: this records the intentions that have committed. during conflict
-    // resolution we need access to arbitrary ranges of committed intention
-    // positions, but we also can't let this grow unbounded. so we'll need to
-    // store this out-of-core at some point.
-    {
-      auto ret = intention_map_.emplace(intention_pos);
-      assert(ret.second);
-    }
+    committed_intentions_.push(intention_pos);
 
     // committed intention key
     std::stringstream ci_key;
