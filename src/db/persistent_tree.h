@@ -8,6 +8,7 @@
 namespace cruzdb {
 
 const std::string PREFIX_USER = "U";
+const std::string PREFIX_COMMITTED_INTENTION = "C";
 
 /**
  * rid: this value uniquely identifies a tree delta (a root plus any nodes

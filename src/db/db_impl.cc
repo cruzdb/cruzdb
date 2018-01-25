@@ -1,6 +1,7 @@
 #include "db_impl.h"
 #include <unistd.h>
 #include <chrono>
+#include <iomanip>
 
 namespace cruzdb {
 
@@ -378,6 +379,10 @@ void DBImpl::TransactionProcessorEntry()
       assert(ret.second);
     }
 
+    // committed intention key
+    std::stringstream ci_key;
+    ci_key << std::setw(20) << std::setfill('0') << intention_pos;
+
     bool need_replay;
     std::unique_ptr<PersistentTree> next_root;
     if (serial) {
@@ -404,8 +409,18 @@ void DBImpl::TransactionProcessorEntry()
           intention_pos);
       lk.unlock();
       ReplayIntention(next_root.get(), *intention);
+      next_root->Put(PREFIX_COMMITTED_INTENTION, ci_key.str(), "");
       root_offset = next_root->infect_self_pointers(intention_pos, true);
     } else {
+      // first impressions are that this Put here really kills performance.
+      // Persumably because its jsut overhead in a strictly serial process. It's
+      // possible that we could store this information in a different way: for
+      // example as just a bunch of backpointers. This would be slower for
+      // finding than in the after image, but in both cases we are going to try
+      // to aggressively cache these entries. We could optimize the LRU for this
+      // index to keep the info around a long time and/or give preference to
+      // this part of the tree in the node cache.
+      next_root->Put(PREFIX_COMMITTED_INTENTION, ci_key.str(), "");
       // this also fixes up the rid. see method for details
       root_offset = next_root->infect_self_pointers(intention_pos, false);
     }
