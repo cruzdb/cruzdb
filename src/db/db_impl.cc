@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <chrono>
 #include <iomanip>
+#include <boost/lexical_cast.hpp>
 
 namespace cruzdb {
 
@@ -272,7 +273,7 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
   auto intention_keys = intention.OpKeys();
 
   // retrieve all of the intentions in the conflict zone.
-  std::vector<uint64_t> intentions;
+  std::vector<uint64_t> intentions_from_index;
   {
     auto snapshot = intention.Snapshot();
     assert(snapshot < root_snapshot_);
@@ -286,7 +287,38 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
     // converts [first, last) to (first, last] since the snapshot is not in the
     // conflict zone, and root_snapshot_ is.
     std::copy(std::next(first),
-        std::next(last), std::back_inserter(intentions));
+        std::next(last), std::back_inserter(intentions_from_index));
+  }
+
+  std::vector<uint64_t> intentions;
+  {
+    // TODO: usually we lock to read root...
+    Snapshot snap(this, root_);
+    auto snapshot = intention.Snapshot();
+    FilteredPrefixIteratorImpl it(PREFIX_COMMITTED_INTENTION, &snap);
+
+    // seek to one past snapshot
+    {
+      std::stringstream key;
+      key << std::setw(20) << std::setfill('0') << snapshot;
+      it.Seek(key.str());
+    }
+    assert(it.Valid());
+    assert(boost::lexical_cast<uint64_t>(it.key().ToString()) == snapshot);
+    it.Next();
+    assert(it.Valid());
+
+    // accumulate intentions up to and including lcs
+    while (it.Valid()) {
+      auto key = it.key();
+      auto pos = boost::lexical_cast<uint64_t>(key.ToString());
+      intentions.push_back(pos);
+      if (pos == root_snapshot_)
+        break;
+      it.Next();
+    }
+    assert(intentions.back() == root_snapshot_);
+    assert(intentions == intentions_from_index);
   }
 
   auto other_intentions = entry_service_.ReadIntentions(intentions);
