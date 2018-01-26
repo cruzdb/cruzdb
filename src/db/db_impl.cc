@@ -692,6 +692,47 @@ void DBImpl::FinishedTransactions::Clean(uint64_t last_ipos)
   // unused_trees destructor called after lock is released
 }
 
+void DBImpl::CommittedIntentionIndex::push(uint64_t pos)
+{
+  auto ret = index_.emplace(pos);
+  assert(ret.second);
+  assert(++ret.first == index_.end());
+  if (index_.size() > limit_) {
+    index_.erase(index_.begin());
+  }
+}
+
+std::pair<std::vector<uint64_t>, bool>
+DBImpl::CommittedIntentionIndex::range(uint64_t first, uint64_t last) const
+{
+  assert(first < last);
+
+  if (index_.empty()) {
+    return std::make_pair(std::vector<uint64_t>{{last}}, false);
+  }
+
+  // oldest position >= first
+  auto it = index_.lower_bound(first);
+  assert(it != index_.end());
+
+  bool complete;
+  if (*it == first) {
+    std::next(it);
+    complete = true;
+  } else {
+    // the range (first, *it] is unknown
+    complete = false;
+  }
+
+  auto it2 = index_.find(last);
+  assert(it2 != index_.end());
+
+  std::vector<uint64_t> res;
+  std::copy(it, std::next(it2), std::back_inserter(res));
+
+  return std::make_pair(res, complete);
+}
+
 void DBImpl::JanitorEntry()
 {
   while (!stop_) {

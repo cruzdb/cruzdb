@@ -157,44 +157,12 @@ class DBImpl : public DB {
   // positions that would create a sparse index.
   class CommittedIntentionIndex {
    public:
-    void push(uint64_t pos) {
-      auto ret = index_.emplace(pos);
-      assert(ret.second);
-      assert(++ret.first == index_.end());
-      if (index_.size() > limit_) {
-        index_.erase(index_.begin());
-      }
-    }
+    void push(uint64_t pos);
 
     // (first, last] or [X<first, last]
-    auto range(uint64_t first, uint64_t last) {
-      assert(first < last);
-
-      if (index_.empty()) {
-        return std::make_pair(std::vector<uint64_t>{{last}}, false);
-      }
-
-      // oldest position >= first
-      auto it = index_.lower_bound(first);
-      assert(it != index_.end());
-
-      bool complete;
-      if (*it == first) {
-        std::next(it);
-        complete = true;
-      } else {
-        // the range (first, *it] is unknown
-        complete = false;
-      }
-
-      auto it2 = index_.find(last);
-      assert(it2 != index_.end());
-
-      std::vector<uint64_t> res;
-      std::copy(it, std::next(it2), std::back_inserter(res));
-
-      return std::make_pair(res, complete);
-    }
+    // ret.second is true if returned range is complete
+    std::pair<std::vector<uint64_t>, bool> range(uint64_t first,
+        uint64_t last) const;
 
    private:
     const size_t limit_ = 1000;
