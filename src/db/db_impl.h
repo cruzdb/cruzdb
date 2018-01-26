@@ -148,7 +148,38 @@ class DBImpl : public DB {
   void NotifyTransaction(int64_t token, uint64_t intention_pos, bool committed);
   void ReplayIntention(PersistentTree *tree, const Intention& intention);
 
+  // committed intention position cache. this is used by the transaction
+  // processor to look-up the position of intentions in a conflict zone. for
+  // zones that begin "not too far" in the past, a cache hit is expected. for
+  // zones that begin outside the range of the cache, query the database
+  // catalog. an lru approach can be taken to integrate intention positions, but
+  // the granularity of eviction should be complete ranges rather than indvidual
+  // positions that would create a sparse index.
+  class CommittedIntentionIndex {
+   public:
+    void push(uint64_t pos);
+
+    // (first, last] or [X<first, last]
+    // ret.second is true if returned range is complete
+    std::pair<std::vector<uint64_t>, bool> range(uint64_t first,
+        uint64_t last) const;
+
+   private:
+    const size_t limit_ = 1000;
+    std::set<uint64_t> index_;
+  };
+
+  CommittedIntentionIndex committed_intentions_;
+
  private:
+  static std::string prefix_string(const std::string& prefix,
+      const std::string& value) {
+    auto out = prefix;
+    out.push_back(0);
+    out.append(value);
+    return out;
+  }
+
   mutable std::mutex lock_;
   zlog::Log *log_;
   NodeCache cache_;
@@ -164,7 +195,6 @@ class DBImpl : public DB {
   EntryService::IntentionQueue *intention_queue_;
   uint64_t last_intention_processed_;
   int64_t in_flight_txn_rid_;
-  std::set<uint64_t> intention_map_;
 
  private:
   class MetricsHandler : public CivetHandler {

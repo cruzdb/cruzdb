@@ -72,7 +72,8 @@ void Java_org_cruzdb_CruzDB_put(JNIEnv *env, jobject jdb, jlong jdbHandle,
 
   auto txn = db->BeginTransaction();
   txn->Put(key_slice, value_slice);
-  txn->Commit();
+  auto committed = txn->Commit();
+  assert(committed);
   delete txn;
 
   delete [] value;

@@ -1,6 +1,8 @@
 #include "db_impl.h"
 #include <unistd.h>
 #include <chrono>
+#include <iomanip>
+#include <boost/lexical_cast.hpp>
 
 namespace cruzdb {
 
@@ -67,7 +69,7 @@ void DBImpl::ReleaseSnapshot(Snapshot *snapshot)
 
 Iterator *DBImpl::NewIterator(Snapshot *snapshot)
 {
-  return new IteratorImpl(snapshot);
+  return new FilteredPrefixIteratorImpl(PREFIX_USER, snapshot);
 }
 
 int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
@@ -214,9 +216,14 @@ int DBImpl::Get(const zlog::Slice& key, std::string *value)
   auto snap = GetSnapshot();
   auto root = snap->root;
 
+  // FIXME: this string/slice/prefix append conversion can be more efficient.
+  // probably a lot more efficient.
+  auto pskey = prefix_string(PREFIX_USER, key.ToString());
+  const zlog::Slice pkey(pskey);
+
   auto cur = root.ref(trace);
   while (cur != Node::Nil()) {
-    int cmp = key.compare(zlog::Slice(cur->key().data(),
+    int cmp = pkey.compare(zlog::Slice(cur->key().data(),
           cur->key().size()));
     if (cmp == 0) {
       value->assign(cur->val().data(), cur->val().size());
@@ -270,25 +277,33 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
   // set of keys read or written by the intention
   auto intention_keys = intention.OpKeys();
 
-  // retrieve all of the intentions in the conflict zone.
-  std::vector<uint64_t> intentions;
-  {
-    auto snapshot = intention.Snapshot();
-    assert(snapshot < root_snapshot_);
+  const auto snapshot = intention.Snapshot();
+  auto irange = committed_intentions_.range(snapshot, root_snapshot_);
+  if (!irange.second) {
+    Snapshot snap(this, root_); // TODO: lock to read root_?
+    FilteredPrefixIteratorImpl it(PREFIX_COMMITTED_INTENTION, &snap);
 
-    auto first = intention_map_.find(snapshot);
-    assert(first != intention_map_.end());
+    std::stringstream key;
+    key << std::setw(20) << std::setfill('0') << snapshot;
 
-    auto last = intention_map_.find(root_snapshot_);
-    assert(last != intention_map_.end());
+    it.Seek(key.str());
+    assert(it.Valid());
+    assert(boost::lexical_cast<uint64_t>(it.key().ToString()) == snapshot);
 
-    // converts [first, last) to (first, last] since the snapshot is not in the
-    // conflict zone, and root_snapshot_ is.
-    std::copy(std::next(first),
-        std::next(last), std::back_inserter(intentions));
+    it.Next();
+    assert(it.Valid());
+
+    while (it.Valid()) {
+      auto key = it.key();
+      auto pos = boost::lexical_cast<uint64_t>(key.ToString());
+      if (pos == irange.first.front())
+        break;
+      irange.first.emplace_back(pos);
+      it.Next();
+    }
   }
 
-  auto other_intentions = entry_service_.ReadIntentions(intentions);
+  auto other_intentions = entry_service_.ReadIntentions(irange.first);
 
   for (auto& other_intention : other_intentions) {
     // set of keys modified by the intention in the conflict zone
@@ -323,12 +338,12 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
 
       case cruzdb_proto::TransactionOp::PUT:
         assert(op.has_val());
-        tree->Put(op.key(), op.val());
+        tree->Put(PREFIX_USER, op.key(), op.val());
         break;
 
       case cruzdb_proto::TransactionOp::DELETE:
         assert(!op.has_val());
-        tree->Delete(op.key());
+        tree->Delete(PREFIX_USER, op.key());
         break;
 
       default:
@@ -369,14 +384,11 @@ void DBImpl::TransactionProcessorEntry()
       continue;
     }
 
-    // TODO: this records the intentions that have committed. during conflict
-    // resolution we need access to arbitrary ranges of committed intention
-    // positions, but we also can't let this grow unbounded. so we'll need to
-    // store this out-of-core at some point.
-    {
-      auto ret = intention_map_.emplace(intention_pos);
-      assert(ret.second);
-    }
+    committed_intentions_.push(intention_pos);
+
+    // committed intention key
+    std::stringstream ci_key;
+    ci_key << std::setw(20) << std::setfill('0') << intention_pos;
 
     bool need_replay;
     std::unique_ptr<PersistentTree> next_root;
@@ -404,8 +416,18 @@ void DBImpl::TransactionProcessorEntry()
           intention_pos);
       lk.unlock();
       ReplayIntention(next_root.get(), *intention);
+      next_root->Put(PREFIX_COMMITTED_INTENTION, ci_key.str(), "");
       root_offset = next_root->infect_self_pointers(intention_pos, true);
     } else {
+      // first impressions are that this Put here really kills performance.
+      // Persumably because its jsut overhead in a strictly serial process. It's
+      // possible that we could store this information in a different way: for
+      // example as just a bunch of backpointers. This would be slower for
+      // finding than in the after image, but in both cases we are going to try
+      // to aggressively cache these entries. We could optimize the LRU for this
+      // index to keep the info around a long time and/or give preference to
+      // this part of the tree in the node cache.
+      next_root->Put(PREFIX_COMMITTED_INTENTION, ci_key.str(), "");
       // this also fixes up the rid. see method for details
       root_offset = next_root->infect_self_pointers(intention_pos, false);
     }
@@ -668,6 +690,47 @@ void DBImpl::FinishedTransactions::Clean(uint64_t last_ipos)
     }
   }
   // unused_trees destructor called after lock is released
+}
+
+void DBImpl::CommittedIntentionIndex::push(uint64_t pos)
+{
+  auto ret = index_.emplace(pos);
+  assert(ret.second);
+  assert(++ret.first == index_.end());
+  if (index_.size() > limit_) {
+    index_.erase(index_.begin());
+  }
+}
+
+std::pair<std::vector<uint64_t>, bool>
+DBImpl::CommittedIntentionIndex::range(uint64_t first, uint64_t last) const
+{
+  assert(first < last);
+
+  if (index_.empty()) {
+    return std::make_pair(std::vector<uint64_t>{{last}}, false);
+  }
+
+  // oldest position >= first
+  auto it = index_.lower_bound(first);
+  assert(it != index_.end());
+
+  bool complete;
+  if (*it == first) {
+    std::next(it);
+    complete = true;
+  } else {
+    // the range (first, *it] is unknown
+    complete = false;
+  }
+
+  auto it2 = index_.find(last);
+  assert(it2 != index_.end());
+
+  std::vector<uint64_t> res;
+  std::copy(it, std::next(it2), std::back_inserter(res));
+
+  return std::make_pair(res, complete);
 }
 
 void DBImpl::JanitorEntry()
