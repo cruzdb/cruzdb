@@ -204,6 +204,14 @@ class DBImpl : public DB {
   CommittedIntentionIndex committed_intentions_;
 
  private:
+  static std::string prefix_string(const std::string& prefix,
+      const std::string& value) {
+    auto out = prefix;
+    out.push_back(0);
+    out.append(value);
+    return out;
+  }
+
   mutable std::mutex lock_;
   zlog::Log *log_;
   NodeCache cache_;

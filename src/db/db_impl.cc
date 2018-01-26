@@ -216,9 +216,14 @@ int DBImpl::Get(const zlog::Slice& key, std::string *value)
   auto snap = GetSnapshot();
   auto root = snap->root;
 
+  // FIXME: this string/slice/prefix append conversion can be more efficient.
+  // probably a lot more efficient.
+  auto pskey = prefix_string(PREFIX_USER, key.ToString());
+  const zlog::Slice pkey(pskey);
+
   auto cur = root.ref(trace);
   while (cur != Node::Nil()) {
-    int cmp = key.compare(zlog::Slice(cur->key().data(),
+    int cmp = pkey.compare(zlog::Slice(cur->key().data(),
           cur->key().size()));
     if (cmp == 0) {
       value->assign(cur->val().data(), cur->val().size());

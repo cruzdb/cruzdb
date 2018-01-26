@@ -10,6 +10,14 @@ import org.cruzdb.zlog.LogException;
 
 public class CruzDBTest {
 
+  CruzDB db;
+
+  @After
+  public void cleanup() {
+    db.dispose();
+    db = null;
+  }
+
   @Test
   public void dbOpen() throws LogException, CruzDBException {
     Random rand = new Random();
@@ -19,8 +27,7 @@ public class CruzDBTest {
     opts.put("path", "db");
     Log log = Log.open("lmdb", opts, logname);
 
-    CruzDB db = CruzDB.open(log, true);
-    db.dispose();
+    db = CruzDB.open(log, true);
   }
 
   @Test
@@ -32,11 +39,9 @@ public class CruzDBTest {
     opts.put("path", "db");
     Log log = Log.open("lmdb", opts, logname);
 
-    CruzDB db = CruzDB.open(log, true);
+    db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value".getBytes());
     assertArrayEquals(db.get("key1".getBytes()), "value".getBytes());
-
-    db.dispose();
   }
 
   @Test
@@ -48,7 +53,7 @@ public class CruzDBTest {
     opts.put("path", "db");
     Log log = Log.open("lmdb", opts, logname);
 
-    CruzDB db = CruzDB.open(log, true);
+    db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value1".getBytes());
     db.put("key2".getBytes(), "value2".getBytes());
 
@@ -75,8 +80,6 @@ public class CruzDBTest {
     assertThat(iterator.value()).isEqualTo("value2".getBytes());
     iterator.next();
     assertThat(iterator.isValid()).isFalse();
-
-    db.dispose();
   }
 
   @Test
@@ -88,14 +91,12 @@ public class CruzDBTest {
     opts.put("path", "db");
     Log log = Log.open("lmdb", opts, logname);
 
-    CruzDB db = CruzDB.open(log, true);
+    db = CruzDB.open(log, true);
     db.put("key1".getBytes(), "value1".getBytes());
     db.put("key2".getBytes(), "value2".getBytes());
 
     Transaction txn = db.newTransaction();
     byte[] value = txn.get("key1".getBytes());
     txn.commit();
-
-    db.dispose();
   }
 }
