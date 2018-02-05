@@ -9,6 +9,7 @@
 #include <zlog/log.h>
 #include "node.h"
 #include "db/cruzdb.pb.h"
+#include <boost/compute/detail/lru_cache.hpp>
 
 namespace cruzdb {
 
@@ -40,7 +41,8 @@ class NodeCache {
     db_(db),
     used_bytes_(0),
     stop_(false),
-    num_slots_(8)
+    num_slots_(8),
+    imap_(100000)
   {
     for (size_t i = 0; i < num_slots_; i++) {
       shards_.push_back(std::unique_ptr<shard>(new shard));
@@ -58,18 +60,13 @@ class NodeCache {
 
   boost::optional<uint64_t> IntentionToAfterImage(uint64_t intention_pos) {
     std::lock_guard<std::mutex> l(lock_);
-    auto it = intention_map_.find(intention_pos);
-    if (it == intention_map_.end()) {
-      return boost::none;
-    } else {
-      return it->second;
-    }
+    return imap_.get(intention_pos);
   }
 
   void SetIntentionMapping(uint64_t intention_pos,
       uint64_t after_image_pos) {
     std::lock_guard<std::mutex> l(lock_);
-    intention_map_.emplace(intention_pos, after_image_pos);
+    imap_.insert(intention_pos, after_image_pos);
   }
 
   void Stop() {
@@ -116,7 +113,7 @@ class NodeCache {
 
   std::list<std::vector<NodeAddress>> traces_;
 
-  std::unordered_map<uint64_t, uint64_t> intention_map_;
+  boost::compute::detail::lru_cache<uint64_t, uint64_t> imap_;
 
   SharedNodeRef deserialize_node(const cruzdb_proto::AfterImage& i,
       uint64_t pos, int index) const;
