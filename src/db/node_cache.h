@@ -9,7 +9,7 @@
 #include <zlog/log.h>
 #include "node.h"
 #include "db/cruzdb.pb.h"
-#include <boost/compute/detail/lru_cache.hpp>
+#include "db/lru_cache.hpp"
 
 namespace cruzdb {
 
@@ -113,7 +113,7 @@ class NodeCache {
 
   std::list<std::vector<NodeAddress>> traces_;
 
-  boost::compute::detail::lru_cache<uint64_t, uint64_t> imap_;
+  lru_cache<uint64_t, uint64_t> imap_;
 
   SharedNodeRef deserialize_node(const cruzdb_proto::AfterImage& i,
       uint64_t pos, int index) const;
