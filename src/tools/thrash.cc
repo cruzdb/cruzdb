@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <limits>
 #include <random>
+#include <spdlog/spdlog.h>
 #include <boost/program_options.hpp>
 #include "port/stack_trace.h"
 #include "cruzdb/db.h"
@@ -91,6 +92,7 @@ int main(int argc, char **argv)
 
   po::notify(vm);
 
+  auto logger = spdlog::stdout_color_mt("cruzdb");
   rocksdb::port::InstallStackTraceHandler();
 
   zlog::Log *log;

@@ -5,11 +5,14 @@
 #include <map>
 #include <unistd.h>
 #include <stdlib.h>
+#include <spdlog/spdlog.h>
 #include "cruzdb/db.h"
 #include <zlog/log.h>
 #include "port/stack_trace.h"
 
 #define MAX_KEY 1000
+
+static std::shared_ptr<spdlog::logger> logger;
 
 class TempDir {
  public:

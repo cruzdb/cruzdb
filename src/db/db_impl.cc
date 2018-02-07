@@ -3,10 +3,12 @@
 #include <chrono>
 #include <iomanip>
 #include <boost/lexical_cast.hpp>
+#include <spdlog/spdlog.h>
 
 namespace cruzdb {
 
-DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
+DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
+    std::shared_ptr<spdlog::logger> logger) :
   log_(log),
   cache_(log, this),
   stop_(false),
@@ -15,13 +17,17 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point) :
   in_flight_txn_rid_(-1),
   root_(Node::Nil(), this),
   metrics_http_server_({"listening_ports", "0.0.0.0:8080", "num_threads", "1"}),
-  metrics_handler_(this)
+  metrics_handler_(this),
+  logger_(logger)
 {
   auto root = cache_.CacheAfterImage(point.after_image, point.after_image_pos);
   root_.replace(root);
 
   root_snapshot_ = point.after_image.intention();
   last_intention_processed_ = root_snapshot_;
+
+  if (logger_)
+    logger_->info("db init i_pos {} ai_pos {}", root_snapshot_, point.after_image_pos);
 
   transaction_processor_thread_ = std::thread(&DBImpl::TransactionProcessorEntry, this);
   afterimage_writer_thread_ = std::thread(&DBImpl::AfterImageWriterEntry, this);
@@ -241,11 +247,14 @@ Transaction *DBImpl::BeginTransaction()
 {
   std::lock_guard<std::mutex> lk(lock_);
   db_stats_.transactions_started++;
-  return new TransactionImpl(this,
+  auto txn = new TransactionImpl(this,
       root_,
       root_snapshot_,
       in_flight_txn_rid_--,
       txn_finder_.NewToken());
+  if (logger_)
+    logger_->info("begin-txn snap {}", root_snapshot_);
+  return txn;
 }
 
 void DBImpl::WaitOnIntention(uint64_t pos)
@@ -363,6 +372,9 @@ void DBImpl::TransactionProcessorEntry()
     }
     const auto intention_pos = intention->Position();
 
+    if (logger_)
+      logger_->info("txn-proc: ipos {}", intention_pos);
+
     // serial intention?
     assert(root_snapshot_ < intention_pos);
     const auto serial = root_snapshot_ == intention->Snapshot();
@@ -453,8 +465,6 @@ void DBImpl::TransactionProcessorEntry()
 
     NotifyTransaction(intention->Token(), intention_pos, true);
   }
-
-  std::cerr << "transaction processor exiting" << std::endl;
 }
 
 // asynchronously dispatch after image serializations to the log
@@ -518,6 +528,9 @@ void DBImpl::AfterImageFinalizerEntry()
 
     auto ipos = tree->Intention();
     auto ai_pos = tree->AfterImage();
+
+    if (logger_)
+      logger_->info("ai-fini: ai_pos {}", ai_pos);
 
     assert(ipos < ai_pos);
     tree->SetDeltaPosition(delta, ai_pos);

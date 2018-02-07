@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <sstream>
 #include <chrono>
+#include <spdlog/spdlog.h>
 
 namespace cruzdb {
 
@@ -10,6 +11,12 @@ DB::~DB()
 }
 
 int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
+{
+  return Open(log, create_if_empty, db, nullptr);
+}
+
+int DB::Open(zlog::Log *log, bool create_if_empty, DB **db,
+    std::shared_ptr<spdlog::logger> logger)
 {
   uint64_t tail;
   int ret = log->CheckTail(&tail);
@@ -69,7 +76,7 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
   ret = DBImpl::FindRestorePoint(log, point, latest_intention);
   assert(ret == 0);
 
-  DBImpl *impl = new DBImpl(log, point);
+  DBImpl *impl = new DBImpl(log, point, logger);
 
   // if there is stuff to roll forward
   impl->WaitOnIntention(latest_intention);
