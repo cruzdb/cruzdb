@@ -5,11 +5,14 @@
 #include <map>
 #include <unistd.h>
 #include <stdlib.h>
+#include <spdlog/spdlog.h>
 #include "cruzdb/db.h"
 #include <zlog/log.h>
 #include "port/stack_trace.h"
 
 #define MAX_KEY 1000
+
+static std::shared_ptr<spdlog::logger> logger;
 
 class TempDir {
  public:
@@ -408,12 +411,16 @@ TEST(Txn, WriteWriteConflict) {
   ret = cruzdb::DB::Open(log, true, &db);
   ASSERT_EQ(ret, 0);
 
+  // note this txn+commit causes the next two transactions created to have
+  // snapshots > 0. the initialization case is handled below in the *SnapInit
+  // variants.
   auto txn0 = db->BeginTransaction();
   txn0->Put("foo", "foo");
   txn0->Commit();
 
   auto txn1 = db->BeginTransaction();
   auto txn2 = db->BeginTransaction();
+  // TODO: assert snapshot property
 
   txn1->Put("bar", "bar");
   txn2->Put("bar", "baz");
@@ -433,21 +440,79 @@ TEST(Txn, WriteWriteNoConflict) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db);
+  ret = cruzdb::DB::Open(log, true, &db, logger);
   ASSERT_EQ(ret, 0);
 
+  // note this txn+commit causes the next two transactions created to have
+  // snapshots > 0. the initialization case is handled below in the *SnapInit
+  // variants.
   auto txn0 = db->BeginTransaction();
   txn0->Put("foo", "foo");
   txn0->Commit();
 
   auto txn1 = db->BeginTransaction();
   auto txn2 = db->BeginTransaction();
+  // TODO: assert snapshot property
 
   txn1->Put("bar", "bar");
   txn2->Put("baz", "baz");
 
-  ASSERT_TRUE(txn1->Commit());
   ASSERT_TRUE(txn2->Commit());
+  ASSERT_TRUE(txn1->Commit());
+
+  delete db;
+  delete log;
+}
+
+// the two transactions created will both have intention zero as their snapshot,
+// exercising initialization edge cases.
+TEST(Txn, WriteWriteConflictSnapInit) {
+  TempDir tdir;
+
+  zlog::Log *log;
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
+  ASSERT_EQ(ret, 0);
+
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db);
+  ASSERT_EQ(ret, 0);
+
+  auto txn1 = db->BeginTransaction();
+  auto txn2 = db->BeginTransaction();
+  // TODO: assert snapshot property
+
+  txn1->Put("bar", "bar");
+  txn2->Put("bar", "baz");
+
+  ASSERT_TRUE(txn1->Commit());
+  ASSERT_FALSE(txn2->Commit());
+
+  delete db;
+  delete log;
+}
+
+// the two transactions created will both have intention zero as their snapshot,
+// exercising initialization edge cases.
+TEST(Txn, WriteWriteNoConflictSnapInit) {
+  TempDir tdir;
+
+  zlog::Log *log;
+  int ret = zlog::Log::Create("lmdb", "log", {{"path", tdir.path}}, "", "", &log);
+  ASSERT_EQ(ret, 0);
+
+  cruzdb::DB *db;
+  ret = cruzdb::DB::Open(log, true, &db, logger);
+  ASSERT_EQ(ret, 0);
+
+  auto txn1 = db->BeginTransaction();
+  auto txn2 = db->BeginTransaction();
+  // TODO: assert snapshot property
+
+  txn1->Put("bar", "bar");
+  txn2->Put("baz", "baz");
+
+  ASSERT_TRUE(txn2->Commit());
+  ASSERT_TRUE(txn1->Commit());
 
   delete db;
   delete log;
@@ -455,6 +520,7 @@ TEST(Txn, WriteWriteNoConflict) {
 
 int main(int argc, char **argv)
 {
+  logger = spdlog::stdout_color_mt("cruzdb");
   rocksdb::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

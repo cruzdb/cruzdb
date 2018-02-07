@@ -49,7 +49,8 @@ class DBImpl : public DB {
   static int FindRestorePoint(zlog::Log *log, RestorePoint& point,
       uint64_t& latest_intention);
 
-  DBImpl(zlog::Log *log, const RestorePoint& point);
+  DBImpl(zlog::Log *log, const RestorePoint& point,
+      std::shared_ptr<spdlog::logger> logger);
 
   ~DBImpl();
 
@@ -276,6 +277,8 @@ class DBImpl : public DB {
   CivetServer metrics_http_server_;
   MetricsHandler metrics_handler_;
   struct DBStats db_stats_;
+
+  std::shared_ptr<spdlog::logger> logger_;
 };
 
 }

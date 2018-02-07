@@ -1,8 +1,13 @@
 #pragma once
 #include <vector>
+#include <memory>
 #include <zlog/log.h>
 #include "iterator.h"
 #include "transaction.h"
+
+namespace spdlog {
+  class logger;
+}
 
 namespace cruzdb {
 
@@ -18,10 +23,10 @@ class DB {
   DB(const DB&) = delete;
   void operator=(const DB&) = delete;
 
-  /*
-   *
-   */
   static int Open(zlog::Log *log, bool create_if_empty, DB **db);
+  static int Open(zlog::Log *log, bool create_if_empty, DB **db,
+      std::shared_ptr<spdlog::logger> logger);
+
 
   /*
    *
