@@ -6,7 +6,7 @@ CruzDB is a key-value database that stores all its data in a single, high-perfor
 
 In order to avoid forcing all database nodes from having to store an entire copy of the database, fine-grained materialized views of the are stored in the log. This allows database nodes to selectively cache database state, while still providing on-demand access to any subset of the database by reading from the log.
 
-If you are thinking that this sounds a lot like Hyder, then you're right! Many components of Hyder can be matched to analagous components in CruzDB and CruzDB tends to use the same language. But the systems do have fundamental differences in how the database is structured and how conflict detection is implemented. In the coming weeks we'll be publishing more details about the design of the system, so please stay tuned (or just read the code :).
+If you are thinking that this sounds a lot like Hyder, then you're right! Many components of Hyder can be matched to analagous components in CruzDB and CruzDB tends to use the same language. But the systems do have fundamental differences in how the database is structured and how conflict detection is implemented. In the coming weeks we'll be publishing more details about the design of the system, so please stay tuned.
 
 # Flux notice
 
