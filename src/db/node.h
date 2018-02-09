@@ -55,31 +55,34 @@ class NodeAddress {
  */
 class NodePtr {
  public:
-  NodePtr(const NodePtr& other) {
-    ref_ = other.ref_;
-    db_ = other.db_;
-    address_ = other.address_;
-  }
-
-  NodePtr& operator=(const NodePtr& other) {
-    ref_ = other.ref_;
-    db_ = other.db_;
-    address_ = other.address_;
-    return *this;
-  }
-
-  // TODO: now we can copy nodeptr. implications?
-  //NodePtr(NodePtr&& other) = delete;
-  NodePtr& operator=(NodePtr&& other) & = delete;
-
-  // TODO: remove read_only
   NodePtr(SharedNodeRef ref, DBImpl *db) :
     ref_(ref),
     address_(boost::none),
     db_(db)
   {}
 
+  NodePtr(const NodePtr& other) {
+    std::lock_guard<std::mutex>(other.lock_);
+    ref_ = other.ref_;
+    db_ = other.db_;
+    address_ = other.address_;
+  }
+
+  NodePtr& operator=(const NodePtr& other) {
+    std::lock_guard<std::mutex>(other.lock_);
+    ref_ = other.ref_;
+    db_ = other.db_;
+    address_ = other.address_;
+    return *this;
+  }
+
+  NodePtr& operator=(NodePtr&& other) & = delete;
+
+  // do we need any sort of locking on other?
+  NodePtr(NodePtr&& other) = default;
+
   void replace(const NodePtr& other) {
+    std::lock_guard<std::mutex>(other.lock_);
     ref_ = other.ref_;
     db_ = other.db_;
     address_ = other.address_;

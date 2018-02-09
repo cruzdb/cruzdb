@@ -122,5 +122,8 @@ int main(int argc, char **argv)
   auto db_map = get_map(db, db->GetSnapshot());
   assert(db_map == cc_map);
 
+  delete db;
+  delete log;
+
   return 0;
 }
