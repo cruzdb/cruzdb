@@ -71,11 +71,6 @@ class EntryService {
   // will remain valid until the entry service is destroyed.
   IntentionQueue *NewIntentionQueue(uint64_t pos);
 
-  // read the intentions in the provided set. this interface should be
-  // asychronous: the caller doesn't need the results in order, nor as a
-  // complete result set.
-  std::list<Intention> ReadIntentions(std::vector<uint64_t> addrs);
-
   // matches intentions with their primary afterimage in the log
   class PrimaryAfterImageMatcher {
    public:
@@ -137,15 +132,44 @@ class EntryService {
 
   PrimaryAfterImageMatcher ai_matcher;
 
-  void AppendAfterImageAsync(const std::string& blob);
-
   // NEW
+
+  // read the intentions in the provided set. this interface should be
+  // asychronous: the caller doesn't need the results in order, nor as a
+  // complete result set.
+  std::list<std::shared_ptr<Intention>> ReadIntentions(
+      std::vector<uint64_t> addrs);
 
   uint64_t Append(cruzdb_proto::Intention& intention);
   uint64_t Append(cruzdb_proto::AfterImage& after_image);
 
   int AppendIntention(std::unique_ptr<Intention> intention, uint64_t *pos);
   uint64_t CheckTail();
+
+  class CacheEntry {
+   public:
+    enum EntryType {
+      INTENTION,
+      AFTERIMAGE
+    };
+
+    EntryType type;
+    std::shared_ptr<Intention> intention;
+  };
+
+  std::map<uint64_t, CacheEntry> entry_cache_;
+
+#if 0
+  class SegmentEntry {
+  };
+
+  // this maps log position to cache entry, where cache entry can self identify
+  // as an afterimage or an intention. the positions are dense. optimizations
+  // might include leaving place holders in to identify the type, or reprsenting
+  // some range as bitmap(s), etc... later we can wrap this dense range cache in
+  // a larger group of dense ranges.
+  std::map<uint64_t, SegmentEntry> segment_;
+#endif
 
  private:
   void Run();

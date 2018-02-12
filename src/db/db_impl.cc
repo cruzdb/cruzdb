@@ -319,7 +319,7 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
 
   for (auto& other_intention : other_intentions) {
     // set of keys modified by the intention in the conflict zone
-    auto other_intention_keys = other_intention.UpdateOpKeys();
+    auto other_intention_keys = other_intention->UpdateOpKeys();
 
     // return abort=true if the set of keys intersect
     for (auto k0 : intention_keys) {
@@ -497,14 +497,6 @@ void DBImpl::AfterImageWriterEntry()
       tree->SerializeAfterImage(after_image, intention_pos, delta);
       assert(after_image.intention() == intention_pos);
 
-      std::string blob;
-      cruzdb_proto::LogEntry entry;
-      entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
-      entry.set_allocated_after_image(&after_image);
-      assert(entry.IsInitialized());
-      assert(entry.SerializeToString(&blob));
-      entry.release_after_image();
-
       entry_service_->ai_matcher.watch(std::move(delta), std::move(tree));
 
       // in its current form, this isn't actually async because there is very
@@ -512,7 +504,7 @@ void DBImpl::AfterImageWriterEntry()
       // for other backends the benefit is huge. other optimizations like not
       // writing the after image if we already know about it by looking at the
       // dedup index.
-      entry_service_->AppendAfterImageAsync(blob);
+      entry_service_->Append(after_image);
     }
 
     lk.lock();

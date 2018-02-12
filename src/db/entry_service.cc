@@ -274,21 +274,52 @@ void EntryService::IntentionQueue::Push(Intention intention)
   cond_.notify_one();
 }
 
-std::list<Intention>
+std::list<std::shared_ptr<Intention>>
 EntryService::ReadIntentions(std::vector<uint64_t> addrs)
 {
-  std::list<Intention> intentions;
   assert(!addrs.empty());
+  std::list<std::shared_ptr<Intention>> intentions;
+  std::vector<uint64_t> missing;
+
+  std::unique_lock<std::mutex> lk(lock_);
   for (auto pos : addrs) {
+    auto it = entry_cache_.find(pos);
+    if (it != entry_cache_.end()) {
+      assert(it->second.type == CacheEntry::EntryType::INTENTION);
+      intentions.push_back(it->second.intention);
+    } else {
+      missing.push_back(pos);
+    }
+  }
+
+  lk.unlock();
+  for (auto pos : missing) {
+    // TODO: dump positions into an i/o queue...
     std::string data;
     int ret = log_->Read(pos, &data);
     assert(ret == 0);
+
     cruzdb_proto::LogEntry entry;
     assert(entry.ParseFromString(data));
     assert(entry.IsInitialized());
     assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
-    intentions.emplace_back(Intention(entry.intention(), pos));
+
+    // this is rather inefficient. below perhaps choose
+    // insert/insert_or_assign, etc... c++17
+    auto intention = std::make_shared<Intention>(
+        entry.intention(), pos);
+
+    CacheEntry cache_entry;
+    cache_entry.type = CacheEntry::EntryType::INTENTION;
+    cache_entry.intention = intention;
+
+    lk.lock();
+    auto p = entry_cache_.emplace(pos, cache_entry);
+    lk.unlock();
+
+    intentions.emplace_back(p.first->second.intention);
   }
+
   return intentions;
 }
 
@@ -393,13 +424,6 @@ void EntryService::PrimaryAfterImageMatcher::gc()
       break;
     }
   }
-}
-
-void EntryService::AppendAfterImageAsync(const std::string& blob)
-{
-  uint64_t afterimage_pos;
-  int ret = log_->Append(blob, &afterimage_pos);
-  assert(ret == 0);
 }
 
 uint64_t EntryService::CheckTail()
