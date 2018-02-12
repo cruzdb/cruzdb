@@ -50,6 +50,7 @@ class DBImpl : public DB {
       uint64_t& latest_intention);
 
   DBImpl(zlog::Log *log, const RestorePoint& point,
+      std::unique_ptr<EntryService> entry_service,
       std::shared_ptr<spdlog::logger> logger);
 
   ~DBImpl();
@@ -186,7 +187,7 @@ class DBImpl : public DB {
   NodeCache cache_;
   bool stop_;
 
-  EntryService entry_service_;
+  std::unique_ptr<EntryService> entry_service_;
 
   std::list<std::unique_ptr<PersistentTree>> lcs_trees_;
   std::condition_variable lcs_trees_cond_;

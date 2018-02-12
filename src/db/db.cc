@@ -28,6 +28,8 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
 int DB::Open(zlog::Log *log, bool create_if_empty, DB **db,
     std::shared_ptr<spdlog::logger> logger)
 {
+  auto entry_service = std::unique_ptr<EntryService>(new EntryService(log));
+
   uint64_t tail;
   int ret = log->CheckTail(&tail);
   assert(ret == 0);
@@ -109,7 +111,8 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db,
   ret = DBImpl::FindRestorePoint(log, point, latest_intention);
   assert(ret == 0);
 
-  DBImpl *impl = new DBImpl(log, point, logger);
+  DBImpl *impl = new DBImpl(log, point,
+      std::move(entry_service), logger);
 
   // if there is stuff to roll forward
   impl->WaitOnIntention(latest_intention);

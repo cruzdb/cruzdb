@@ -8,18 +8,21 @@
 namespace cruzdb {
 
 DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
+    std::unique_ptr<EntryService> entry_service,
     std::shared_ptr<spdlog::logger> logger) :
   log_(log),
   cache_(log, this),
   stop_(false),
-  entry_service_(log, point.replay_start_pos, &lock_),
-  intention_queue_(entry_service_.NewIntentionQueue(point.replay_start_pos)),
+  entry_service_(std::move(entry_service)),
+  intention_queue_(entry_service_->NewIntentionQueue(point.replay_start_pos)),
   in_flight_txn_rid_(-1),
   root_(Node::Nil(), this),
   metrics_http_server_({"listening_ports", "0.0.0.0:8080", "num_threads", "1"}),
   metrics_handler_(this),
   logger_(logger)
 {
+  entry_service_->Start(point.replay_start_pos);
+
   auto root = cache_.CacheAfterImage(point.after_image, point.after_image_pos);
   root_.replace(root);
 
@@ -48,7 +51,7 @@ DBImpl::~DBImpl()
   janitor_cond_.notify_one();
   janitor_thread_.join();
 
-  entry_service_.Stop();
+  entry_service_->Stop();
 
   lcs_trees_cond_.notify_one();
 
@@ -312,7 +315,7 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
     }
   }
 
-  auto other_intentions = entry_service_.ReadIntentions(irange.first);
+  auto other_intentions = entry_service_->ReadIntentions(irange.first);
 
   for (auto& other_intention : other_intentions) {
     // set of keys modified by the intention in the conflict zone
@@ -502,14 +505,14 @@ void DBImpl::AfterImageWriterEntry()
       assert(entry.SerializeToString(&blob));
       entry.release_after_image();
 
-      entry_service_.ai_matcher.watch(std::move(delta), std::move(tree));
+      entry_service_->ai_matcher.watch(std::move(delta), std::move(tree));
 
       // in its current form, this isn't actually async because there is very
       // little, if any, benefit from actual AIO with the LMDB/RAM backends. for
       // for other backends the benefit is huge. other optimizations like not
       // writing the after image if we already know about it by looking at the
       // dedup index.
-      entry_service_.AppendAfterImageAsync(blob);
+      entry_service_->AppendAfterImageAsync(blob);
     }
 
     lk.lock();
@@ -519,7 +522,7 @@ void DBImpl::AfterImageWriterEntry()
 void DBImpl::AfterImageFinalizerEntry()
 {
   while (true) {
-    auto tree_info = entry_service_.ai_matcher.match();
+    auto tree_info = entry_service_->ai_matcher.match();
     if (!tree_info.second)
       break;
 
@@ -552,7 +555,7 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
 
   // MOVE txn's intention to the append io service
   uint64_t pos;
-  auto ret = entry_service_.AppendIntention(
+  auto ret = entry_service_->AppendIntention(
       std::move(txn->GetIntention()), &pos);
   assert(ret == 0);
 

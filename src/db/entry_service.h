@@ -39,9 +39,9 @@ class EntryCache {
 
 class EntryService {
  public:
-  EntryService(zlog::Log *log, uint64_t pos,
-      std::mutex *db_lock);
+  explicit EntryService(zlog::Log *log);
 
+  void Start(uint64_t pos);
   void Stop();
 
  public:
@@ -148,8 +148,6 @@ class EntryService {
   uint64_t pos_;
   bool stop_;
   std::mutex lock_;
-
-  std::mutex *db_lock_;
 
   std::list<std::unique_ptr<IntentionQueue>> intention_queues_;
 

@@ -4,15 +4,17 @@
 
 namespace cruzdb {
 
-EntryService::EntryService(zlog::Log *log, uint64_t pos,
-    std::mutex *db_lock) :
+EntryService::EntryService(zlog::Log *log) :
   log_(log),
-  pos_(pos),
-  stop_(false),
-  db_lock_(db_lock),
-  log_reader_(std::thread(&EntryService::Run, this)),
-  intention_reader_(std::thread(&EntryService::IntentionReader, this))
+  stop_(false)
 {
+}
+
+void EntryService::Start(uint64_t pos)
+{
+  pos_ = pos;
+  log_reader_ = std::thread(&EntryService::Run, this);
+  intention_reader_ = std::thread(&EntryService::IntentionReader, this);
 }
 
 void EntryService::Stop()
