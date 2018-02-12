@@ -402,4 +402,58 @@ void EntryService::AppendAfterImageAsync(const std::string& blob)
   assert(ret == 0);
 }
 
+uint64_t EntryService::CheckTail()
+{
+  uint64_t pos;
+  int ret = log_->CheckTail(&pos);
+  if (ret) {
+    std::cerr << "failed to check tail" << std::endl;
+    assert(0);
+    exit(1);
+  }
+  return pos;
+}
+
+uint64_t EntryService::Append(cruzdb_proto::Intention& intention)
+{
+  cruzdb_proto::LogEntry entry;
+  entry.set_type(cruzdb_proto::LogEntry::INTENTION);
+  entry.set_allocated_intention(&intention);
+  assert(entry.IsInitialized());
+
+  std::string blob;
+  assert(entry.SerializeToString(&blob));
+  entry.release_intention();
+
+  uint64_t pos;
+  int ret = log_->Append(blob, &pos);
+  if (ret) {
+    std::cerr << "failed to append intention" << std::endl;
+    assert(0);
+    exit(1);
+  }
+  return pos;
+}
+
+uint64_t EntryService::Append(cruzdb_proto::AfterImage& after_image)
+{
+  cruzdb_proto::LogEntry entry;
+  entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
+  entry.set_allocated_after_image(&after_image);
+  assert(entry.IsInitialized());
+
+  std::string blob;
+  assert(entry.SerializeToString(&blob));
+  entry.release_after_image();
+
+  uint64_t pos;
+  int ret = log_->Append(blob, &pos);
+  if (ret) {
+    std::cerr << "failed to append after image" << std::endl;
+    assert(0);
+    exit(1);
+  }
+  return pos;
+}
+
 }

@@ -45,7 +45,6 @@ class EntryService {
   void Stop();
 
  public:
-  int AppendIntention(std::unique_ptr<Intention> intention, uint64_t *pos);
 
   class IntentionQueue {
    public:
@@ -139,6 +138,14 @@ class EntryService {
   PrimaryAfterImageMatcher ai_matcher;
 
   void AppendAfterImageAsync(const std::string& blob);
+
+  // NEW
+
+  uint64_t Append(cruzdb_proto::Intention& intention);
+  uint64_t Append(cruzdb_proto::AfterImage& after_image);
+
+  int AppendIntention(std::unique_ptr<Intention> intention, uint64_t *pos);
+  uint64_t CheckTail();
 
  private:
   void Run();
