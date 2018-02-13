@@ -13,8 +13,8 @@ EntryService::EntryService(zlog::Log *log) :
 void EntryService::Start(uint64_t pos)
 {
   pos_ = pos;
-  log_reader_ = std::thread(&EntryService::Run, this);
   intention_reader_ = std::thread(&EntryService::IntentionReader, this);
+  io_thread_ = std::thread(&EntryService::IOEntry, this);
 }
 
 void EntryService::Stop()
@@ -30,8 +30,8 @@ void EntryService::Stop()
     q->Stop();
   }
 
-  log_reader_.join();
   intention_reader_.join();
+  io_thread_.join();
 }
 
 void EntryCache::Insert(std::unique_ptr<Intention> intention)
@@ -157,68 +157,72 @@ void EntryService::IntentionReader()
   }
 }
 
-void EntryService::Run()
+void EntryService::IOEntry()
 {
+  uint64_t next = pos_;
+
   while (true) {
     {
-      std::lock_guard<std::mutex> l(lock_);
+      std::lock_guard<std::mutex> lk(lock_);
       if (stop_)
-        return;
+        break;
     }
+    auto tail = CheckTail();
+    assert(next <= tail);
+    if (next == tail) {
+      std::this_thread::sleep_for(std::chrono::microseconds(1000));
+      continue;
+    }
+    while (next < tail) {
+      std::unique_lock<std::mutex> lk(lock_);
+      auto it = entry_cache_.find(next);
+      if (it == entry_cache_.end()) {
+        lk.unlock();
+        std::string data;
+        int ret = log_->Read(next, &data);
+        if (ret) {
+          if (ret == -ENOENT) {
+            // we aren't going to spin on the tail, but we haven't yet implemented
+            // a fill policy, and really we shouldn't have holes in our
+            // single-node setup, so we just spin on the hole for now...
+            continue;
+          }
+          assert(0);
+        }
 
-    std::string data;
+        cruzdb_proto::LogEntry entry;
+        assert(entry.ParseFromString(data));
+        assert(entry.IsInitialized());
 
-    // need to fill log positions. this is because it is important that any
-    // after image that is currently the first occurence following its
-    // intention, remains that way.
-    int ret = log_->Read(pos_, &data);
-    if (ret) {
-      // TODO: be smart about reading. we shouldn't wait one second, and we
-      // should sometimes fill holes. the current infrastructure won't generate
-      // holes in testing, so this will work for now.
-      if (ret == -ENOENT) {
-        /*
-         * TODO: currently we can run into a soft lockup where the log reader is
-         * spinning on a position that hasn't been written. that's weird, since
-         * we aren't observing any failed clients or sequencer or anything, so
-         * every position should be written.
-         *
-         * what might be happening.. is that there is a hole, but the entity
-         * assigned to fill that hole is waiting on something a bit further
-         * ahead in the log, so no progress is being made...
-         *
-         * lets get a confirmation about the state here so we can record this
-         * case. it would be an interesting case.
-         *
-         * do timeout waits so we can see with print statements...
-         */
-        continue;
+        CacheEntry cache_entry;
+
+        switch (entry.type()) {
+          case cruzdb_proto::LogEntry::AFTER_IMAGE:
+            cache_entry.type = CacheEntry::EntryType::AFTERIMAGE;
+            cache_entry.after_image =
+              std::make_shared<cruzdb_proto::AfterImage>(
+                  std::move(entry.after_image()));
+            ai_matcher.push(entry.after_image(), next);
+            break;
+
+          case cruzdb_proto::LogEntry::INTENTION:
+            cache_entry.type = CacheEntry::EntryType::INTENTION;
+            cache_entry.intention = std::make_shared<Intention>(
+                entry.intention(), next);
+            break;
+
+          default:
+            assert(0);
+            exit(1);
+        }
+
+        lk.lock();
+        entry_cache_.emplace(next, cache_entry);
+        lk.unlock();
       }
-      assert(0);
+
+      next++;
     }
-
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
-
-    // TODO: look into using Arena allocation in protobufs, or moving to
-    // flatbuffers. we basically want to avoid all the copying here, by doing
-    // something like pushing a pointer onto these lists, or using move
-    // semantics.
-    switch (entry.type()) {
-      case cruzdb_proto::LogEntry::AFTER_IMAGE:
-        ai_matcher.push(entry.after_image(), pos_);
-        break;
-
-      case cruzdb_proto::LogEntry::INTENTION:
-        break;
-
-      default:
-        assert(0);
-        exit(1);
-    }
-
-    pos_++;
   }
 }
 

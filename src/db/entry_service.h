@@ -155,6 +155,7 @@ class EntryService {
 
     EntryType type;
     std::shared_ptr<Intention> intention;
+    std::shared_ptr<cruzdb_proto::AfterImage> after_image;
   };
 
   std::map<uint64_t, CacheEntry> entry_cache_;
@@ -171,8 +172,9 @@ class EntryService {
   std::map<uint64_t, SegmentEntry> segment_;
 #endif
 
+  void IOEntry();
+
  private:
-  void Run();
   void IntentionReader();
 
   zlog::Log *log_;
@@ -184,8 +186,8 @@ class EntryService {
 
   EntryCache cache_;
 
-  std::thread log_reader_;
   std::thread intention_reader_;
+  std::thread io_thread_;
 };
 
 }
