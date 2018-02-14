@@ -126,8 +126,6 @@ class EntryService {
   void IOEntry();
 
  private:
-  void IntentionReader();
-
   zlog::Log *log_;
   uint64_t pos_;
   bool stop_;
