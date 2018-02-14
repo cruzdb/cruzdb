@@ -157,20 +157,11 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
     }
   }
 
-  std::string snapshot;
-  int ret = log_->Read(afterimage, &snapshot);
-  assert(ret == 0);
-
-  cruzdb_proto::LogEntry log_entry;
-  assert(log_entry.ParseFromString(snapshot));
-  assert(log_entry.IsInitialized());
-  assert(log_entry.type() != cruzdb_proto::LogEntry::INTENTION);
-  assert(log_entry.type() == cruzdb_proto::LogEntry::AFTER_IMAGE);
-  auto i = log_entry.after_image();
+  auto ai = db_->entry_service_->ReadAfterImage(afterimage);
 
   // TODO: this probably changes when resolving through intention rather than
   // after image no?
-  auto nn = deserialize_node(i, afterimage, offset);
+  auto nn = deserialize_node(*ai, afterimage, offset);
 
   // add to cache. make sure it didn't show up after we released the lock to
   // read the node from the log.

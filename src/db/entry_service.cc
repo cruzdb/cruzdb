@@ -282,6 +282,15 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos)
   return p.first->second;
 }
 
+std::shared_ptr<cruzdb_proto::AfterImage>
+EntryService::ReadAfterImage(uint64_t pos)
+{
+  auto entry = Read(pos);
+  assert(entry);
+  assert(entry->type == CacheEntry::EntryType::AFTERIMAGE);
+  return entry->after_image;
+}
+
 // this api expects that the addresses being read fall below the actual tail of
 // the log. not that it is a problem, but it might influence the policy for hole
 // filling. or it might be an error here, since why would we even have a

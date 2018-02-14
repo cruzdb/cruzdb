@@ -108,6 +108,8 @@ class EntryService {
 
   boost::optional<CacheEntry> Read(uint64_t pos);
 
+  std::shared_ptr<cruzdb_proto::AfterImage> ReadAfterImage(uint64_t pos);
+
   std::map<uint64_t, CacheEntry> entry_cache_;
 
   class Iterator {
