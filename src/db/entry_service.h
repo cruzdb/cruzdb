@@ -11,32 +11,6 @@
 
 namespace cruzdb {
 
-// one critical method for increasing performance is to eliminate as much
-// blocking on io as possible. for example, when a transaction finishes it
-// writes an intention to the log. once that intention is written it becomes
-// immutable. so during replay, it doesn't matter if the source of an intention
-// is the log or an already existing, identical version in memory. the same
-// holds true for any other type of entry in the log. the entry cache is a write
-// through cache that can be consulted before going to the log for a particular
-// log entry.
-//
-// there is potential for some very interesting enhancements to the entry cache.
-// for example, in addition to an in-memory cache being a single layer above the
-// log, we can introduce a cache on local devices using something like lmdb.
-// another enhancement is to create a distributed cache connected to peer nodes.
-// when multiple nodes are submitting transactions, every other node needs to
-// read intentions in log order. however, it may be orders of magnitude faster
-// to retreive / push entries across the network using rdma than go to the log.
-class EntryCache {
- public:
-  void Insert(std::unique_ptr<Intention> intention);
-  boost::optional<Intention> FindIntention(uint64_t pos);
-
- private:
-  std::mutex lock_;
-  std::map<uint64_t, std::unique_ptr<Intention>> intentions_;
-};
-
 class EntryService {
  public:
   explicit EntryService(zlog::Log *log);
@@ -45,32 +19,6 @@ class EntryService {
   void Stop();
 
  public:
-
-  class IntentionQueue {
-   public:
-    explicit IntentionQueue(uint64_t pos);
-
-    void Stop();
-    boost::optional<Intention> Wait();
-
-   private:
-    friend class EntryService;
-
-    uint64_t Position() const;
-    void Push(Intention intention);
-
-    mutable std::mutex lock_;
-    uint64_t pos_;
-    bool stop_;
-    std::queue<Intention> q_;
-    std::condition_variable cond_;
-  };
-
-  // create a non-owning intention queue. the queue can be used to access all
-  // intentions in their log order, starting at the provided position. the queue
-  // will remain valid until the entry service is destroyed.
-  IntentionQueue *NewIntentionQueue(uint64_t pos);
-
   // matches intentions with their primary afterimage in the log
   class PrimaryAfterImageMatcher {
    public:
@@ -143,7 +91,7 @@ class EntryService {
   uint64_t Append(cruzdb_proto::Intention& intention);
   uint64_t Append(cruzdb_proto::AfterImage& after_image);
 
-  int AppendIntention(std::unique_ptr<Intention> intention, uint64_t *pos);
+  uint64_t Append(std::unique_ptr<Intention> intention);
   uint64_t CheckTail();
 
   class CacheEntry {
@@ -158,19 +106,22 @@ class EntryService {
     std::shared_ptr<cruzdb_proto::AfterImage> after_image;
   };
 
+  boost::optional<CacheEntry> Read(uint64_t pos);
+
   std::map<uint64_t, CacheEntry> entry_cache_;
 
-#if 0
-  class SegmentEntry {
+  class IntentionIterator {
+   public:
+    IntentionIterator(EntryService *entry_service, uint64_t pos);
+    boost::optional<std::shared_ptr<Intention>> Next();
+
+   private:
+    uint64_t pos_;
+    bool stop_;
+    EntryService *entry_service_;
   };
 
-  // this maps log position to cache entry, where cache entry can self identify
-  // as an afterimage or an intention. the positions are dense. optimizations
-  // might include leaving place holders in to identify the type, or reprsenting
-  // some range as bitmap(s), etc... later we can wrap this dense range cache in
-  // a larger group of dense ranges.
-  std::map<uint64_t, SegmentEntry> segment_;
-#endif
+  IntentionIterator NewIntentionIterator(uint64_t pos);
 
   void IOEntry();
 
@@ -182,11 +133,9 @@ class EntryService {
   bool stop_;
   std::mutex lock_;
 
-  std::list<std::unique_ptr<IntentionQueue>> intention_queues_;
+  uint64_t max_pos_;
+  std::list<std::condition_variable*> tail_waiters_;
 
-  EntryCache cache_;
-
-  std::thread intention_reader_;
   std::thread io_thread_;
 };
 

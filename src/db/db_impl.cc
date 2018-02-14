@@ -14,7 +14,7 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
   cache_(log, this),
   stop_(false),
   entry_service_(std::move(entry_service)),
-  intention_queue_(entry_service_->NewIntentionQueue(point.replay_start_pos)),
+  intention_iterator_(entry_service_->NewIntentionIterator(point.replay_start_pos)),
   in_flight_txn_rid_(-1),
   root_(Node::Nil(), this),
   metrics_http_server_({"listening_ports", "0.0.0.0:8080", "num_threads", "1"}),
@@ -369,10 +369,11 @@ void DBImpl::TransactionProcessorEntry()
 {
   while (true) {
     // next intention to process
-    const auto intention = intention_queue_->Wait();
-    if (!intention) {
+    const auto opt_intention = intention_iterator_.Next();
+    if (!opt_intention) {
       break;
     }
+    const auto intention = *opt_intention;
     const auto intention_pos = intention->Position();
 
     if (logger_)
@@ -546,10 +547,7 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   txn_finder_.AddTokenWaiter(waiter, token);
 
   // MOVE txn's intention to the append io service
-  uint64_t pos;
-  auto ret = entry_service_->AppendIntention(
-      std::move(txn->GetIntention()), &pos);
-  assert(ret == 0);
+  auto pos = entry_service_->Append(std::move(txn->GetIntention()));
 
   // MOVE txn's tree into index for txn processor
   auto tree = std::move(txn->Tree());
