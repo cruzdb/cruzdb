@@ -110,15 +110,21 @@ class EntryService {
 
   std::map<uint64_t, CacheEntry> entry_cache_;
 
-  class IntentionIterator {
+  class Iterator {
    public:
-    IntentionIterator(EntryService *entry_service, uint64_t pos);
-    boost::optional<std::shared_ptr<Intention>> Next();
+    Iterator(EntryService *entry_service, uint64_t pos);
+    boost::optional<EntryService::CacheEntry> Next();
 
    private:
     uint64_t pos_;
     bool stop_;
     EntryService *entry_service_;
+  };
+
+  class IntentionIterator : private EntryService::Iterator {
+   public:
+    IntentionIterator(EntryService *entry_service, uint64_t pos);
+    boost::optional<std::shared_ptr<Intention>> Next();
   };
 
   IntentionIterator NewIntentionIterator(uint64_t pos);

@@ -137,12 +137,7 @@ void EntryService::IOEntry()
   }
 }
 
-EntryService::IntentionIterator EntryService::NewIntentionIterator(uint64_t pos)
-{
-  return IntentionIterator(this, pos);
-}
-
-EntryService::IntentionIterator::IntentionIterator(
+EntryService::Iterator::Iterator(
     EntryService *entry_service, uint64_t pos) :
   pos_(pos),
   stop_(false),
@@ -150,18 +145,33 @@ EntryService::IntentionIterator::IntentionIterator(
 {
 }
 
-// TODO: we can make this more efficient by tapping into the underlying cache
-// data structure and actually using lower level iterators...
+boost::optional<EntryService::CacheEntry> EntryService::Iterator::Next()
+{
+  auto entry = entry_service_->Read(pos_);
+  pos_++;
+  return entry;
+}
+
+EntryService::IntentionIterator
+EntryService::NewIntentionIterator(uint64_t pos)
+{
+  return IntentionIterator(this, pos);
+}
+
+EntryService::IntentionIterator::IntentionIterator(
+    EntryService *entry_service, uint64_t pos) :
+  Iterator(entry_service, pos)
+{
+}
+
 boost::optional<std::shared_ptr<Intention>>
 EntryService::IntentionIterator::Next()
 {
   while (true) {
-    auto entry = entry_service_->Read(pos_);
+    auto entry = EntryService::Iterator::Next();
     if (entry) {
-      pos_++;
       if (entry->type == CacheEntry::EntryType::INTENTION)
         return entry->intention;
-      assert(entry->type == CacheEntry::EntryType::AFTERIMAGE);
     } else {
       return boost::none;
     }
