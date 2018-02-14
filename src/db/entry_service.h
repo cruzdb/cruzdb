@@ -113,7 +113,8 @@ class EntryService {
   class Iterator {
    public:
     Iterator(EntryService *entry_service, uint64_t pos);
-    boost::optional<EntryService::CacheEntry> Next();
+    boost::optional<std::pair<uint64_t,
+      EntryService::CacheEntry>> Next();
 
    private:
     uint64_t pos_;
@@ -128,6 +129,15 @@ class EntryService {
   };
 
   IntentionIterator NewIntentionIterator(uint64_t pos);
+
+  class AfterImageIterator : private EntryService::Iterator {
+   public:
+    AfterImageIterator(EntryService *entry_service, uint64_t pos);
+    boost::optional<std::pair<uint64_t,
+      std::shared_ptr<cruzdb_proto::AfterImage>>> Next();
+  };
+
+  AfterImageIterator NewAfterImageIterator(uint64_t pos);
 
   void IOEntry();
 

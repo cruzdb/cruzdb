@@ -187,8 +187,10 @@ class DBImpl : public DB {
   NodeCache cache_;
   bool stop_;
 
+ public:
   std::unique_ptr<EntryService> entry_service_;
 
+ private:
   std::list<std::unique_ptr<PersistentTree>> lcs_trees_;
   std::condition_variable lcs_trees_cond_;
 

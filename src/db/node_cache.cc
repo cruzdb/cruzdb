@@ -104,50 +104,20 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
     if (tmp) {
       afterimage = *tmp;
     } else {
-      // look up from cache index, or main index, but definitely minimize the
-      // times we have resort to scanning! hey look, another time we need to
-      // have a scan!
       const auto intention = address->Position();
-      auto pos = intention + 1;
+      const auto pos = intention + 1;
+      auto it = db_->entry_service_->NewAfterImageIterator(pos);
       while (true) {
-        bool done = false;
-
-        // i wouldn't be surprised if tehre was a scenario in which we read to
-        // the end of the log without finding the afterimage. especially on some
-        // startup scenario.... so....
-        std::string data;
-        int ret = log_->Read(pos, &data);
-        assert(ret == 0);
-
-        cruzdb_proto::LogEntry entry;
-        assert(entry.ParseFromString(data));
-        assert(entry.IsInitialized());
-
-        switch (entry.type()) {
-          case cruzdb_proto::LogEntry::INTENTION:
-            break;
-
-          case cruzdb_proto::LogEntry::AFTER_IMAGE:
-            {
-              auto ai = entry.after_image();
-              if (ai.intention() == intention) {
-                // obvs an index cache needs to be updated now
-                afterimage = pos;
-                done = true;
-                break;
-              }
-            }
-            break;
-
-          default:
-            assert(0);
-            exit(1);
+        auto ai = it.Next();
+        if (!ai) {
+          std::cout << "this is not good. but maybe during shutdown" << std::endl;
+          assert(0);
+          exit(1);
         }
-
-        if (done)
+        if (ai->second->intention() == intention) {
+          afterimage = ai->first;
           break;
-
-        pos++;
+        }
       }
     }
   }

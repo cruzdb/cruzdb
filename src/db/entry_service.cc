@@ -145,11 +145,15 @@ EntryService::Iterator::Iterator(
 {
 }
 
-boost::optional<EntryService::CacheEntry> EntryService::Iterator::Next()
+boost::optional<std::pair<uint64_t, EntryService::CacheEntry>>
+EntryService::Iterator::Next()
 {
-  auto entry = entry_service_->Read(pos_);
-  pos_++;
-  return entry;
+  const auto pos = pos_++;
+  auto entry = entry_service_->Read(pos);
+  if (entry) {
+    return std::make_pair(pos, *entry);
+  }
+  return boost::none;
 }
 
 EntryService::IntentionIterator
@@ -170,8 +174,35 @@ EntryService::IntentionIterator::Next()
   while (true) {
     auto entry = EntryService::Iterator::Next();
     if (entry) {
-      if (entry->type == CacheEntry::EntryType::INTENTION)
-        return entry->intention;
+      if (entry->second.type == CacheEntry::EntryType::INTENTION)
+        return entry->second.intention;
+    } else {
+      return boost::none;
+    }
+  }
+}
+
+EntryService::AfterImageIterator
+EntryService::NewAfterImageIterator(uint64_t pos)
+{
+  return AfterImageIterator(this, pos);
+}
+
+EntryService::AfterImageIterator::AfterImageIterator(
+    EntryService *entry_service, uint64_t pos) :
+  Iterator(entry_service, pos)
+{
+}
+
+boost::optional<std::pair<uint64_t,
+  std::shared_ptr<cruzdb_proto::AfterImage>>>
+EntryService::AfterImageIterator::Next()
+{
+  while (true) {
+    auto entry = EntryService::Iterator::Next();
+    if (entry) {
+      if (entry->second.type == CacheEntry::EntryType::AFTERIMAGE)
+        return std::make_pair(entry->first, entry->second.after_image);
     } else {
       return boost::none;
     }
