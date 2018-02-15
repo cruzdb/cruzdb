@@ -106,8 +106,6 @@ class EntryService {
 
   boost::optional<CacheEntry> Read(uint64_t pos, bool fill = false);
 
-  std::shared_ptr<cruzdb_proto::AfterImage> ReadAfterImage(uint64_t pos);
-
   std::map<uint64_t, CacheEntry> entry_cache_;
 
   template<bool Forward>
@@ -178,6 +176,11 @@ class EntryService {
   uint64_t Append(cruzdb_proto::Intention& intention) const;
   uint64_t Append(cruzdb_proto::AfterImage& after_image) const;
   uint64_t Append(std::unique_ptr<Intention> intention);
+
+  // Read an afterimage at the provided position. It is a fatal error if the log
+  // does not contain an afterimage at the position.
+  std::shared_ptr<cruzdb_proto::AfterImage>
+    ReadAfterImage(const uint64_t pos);
   ////////////////////////////////////////////////////////////////
 
  private:

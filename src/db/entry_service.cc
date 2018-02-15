@@ -245,15 +245,6 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool 
   return p.first->second;
 }
 
-std::shared_ptr<cruzdb_proto::AfterImage>
-EntryService::ReadAfterImage(uint64_t pos)
-{
-  auto entry = Read(pos);
-  assert(entry);
-  assert(entry->type == CacheEntry::EntryType::AFTERIMAGE);
-  return entry->after_image;
-}
-
 // this api expects that the addresses being read fall below the actual tail of
 // the log. not that it is a problem, but it might influence the policy for hole
 // filling. or it might be an error here, since why would we even have a
@@ -491,6 +482,68 @@ uint64_t EntryService::Append(std::unique_ptr<Intention> intention)
   }
 
   return pos;
+}
+
+std::shared_ptr<cruzdb_proto::AfterImage>
+EntryService::ReadAfterImage(const uint64_t pos)
+{
+  std::unique_lock<std::mutex> lk(lock_);
+
+  // check for afterimage in the cache
+  auto it = entry_cache_.find(pos);
+  if (it != entry_cache_.end()) {
+    assert(it->second.type ==
+        CacheEntry::EntryType::AFTERIMAGE);
+    return it->second.after_image;
+  }
+
+  lk.unlock();
+
+  int delay = 1;
+  while (true) {
+    std::string data;
+    int ret = log_->Read(pos, &data);
+    if (ret) {
+      if (ret == -ENODATA) {
+        // a filled entry will never be an afterimage
+        std::cerr << "unexpected log entry" << std::endl;
+        assert(0);
+        exit(1);
+      }
+      // try again with increasing delay
+      std::cerr << "failed to read pos " << pos << " ret " << ret << std::endl;
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+      delay = std::min(delay*10, 1000);
+      continue;
+    }
+
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+
+    CacheEntry cache_entry;
+    switch (entry.type()) {
+      case cruzdb_proto::LogEntry::AFTER_IMAGE:
+        cache_entry.type = CacheEntry::EntryType::AFTERIMAGE;
+        cache_entry.after_image =
+          std::make_shared<cruzdb_proto::AfterImage>(
+              std::move(entry.after_image()));
+        break;
+
+      case cruzdb_proto::LogEntry::INTENTION:
+      default:
+        std::cerr << "unexpected log entry" << std::endl;
+        assert(0);
+        exit(1);
+    }
+
+    // insert entry into the cache
+    lk.lock();
+    auto p = entry_cache_.emplace(pos, cache_entry);
+    assert(p.first->second.type ==
+        CacheEntry::EntryType::AFTERIMAGE);
+    return p.first->second.after_image;
+  }
 }
 
 }
