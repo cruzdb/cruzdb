@@ -35,7 +35,7 @@ class DBImpl : public DB {
   struct RestorePoint {
     uint64_t replay_start_pos;
     uint64_t after_image_pos;
-    cruzdb_proto::AfterImage after_image;
+    std::shared_ptr<cruzdb_proto::AfterImage> after_image;
   };
 
   struct DBStats {
@@ -46,7 +46,7 @@ class DBImpl : public DB {
   // instance. the returned RestorePoint can be passed to the DBImpl
   // constructor. then use WaitOnIntention to wait until the database has rolled
   // the log forward.
-  static int FindRestorePoint(zlog::Log *log, RestorePoint& point,
+  static int FindRestorePoint(EntryService *entry_service, RestorePoint& point,
       uint64_t& latest_intention);
 
   DBImpl(zlog::Log *log, const RestorePoint& point,

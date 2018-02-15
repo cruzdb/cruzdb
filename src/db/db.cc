@@ -81,7 +81,8 @@ int DB::Open(zlog::Log *log, bool create_if_empty, DB **db,
 
   DBImpl::RestorePoint point;
   uint64_t latest_intention;
-  int ret = DBImpl::FindRestorePoint(log, point, latest_intention);
+  int ret = DBImpl::FindRestorePoint(entry_service.get(),
+      point, latest_intention);
   assert(ret == 0);
 
   DBImpl *impl = new DBImpl(log, point,

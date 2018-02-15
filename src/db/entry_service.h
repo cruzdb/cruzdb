@@ -2,6 +2,7 @@
 #include <condition_variable>
 #include <list>
 #include <mutex>
+#include <functional>
 #include <queue>
 #include <thread>
 #include <boost/optional.hpp>
@@ -92,13 +93,14 @@ class EntryService {
   uint64_t Append(cruzdb_proto::AfterImage& after_image);
 
   uint64_t Append(std::unique_ptr<Intention> intention);
-  uint64_t CheckTail();
+  uint64_t CheckTail(bool update_max_pos = false);
 
   class CacheEntry {
    public:
     enum EntryType {
       INTENTION,
-      AFTERIMAGE
+      AFTERIMAGE,
+      FILLED
     };
 
     EntryType type;
@@ -106,25 +108,58 @@ class EntryService {
     std::shared_ptr<cruzdb_proto::AfterImage> after_image;
   };
 
-  boost::optional<CacheEntry> Read(uint64_t pos);
+  boost::optional<CacheEntry> Read(uint64_t pos, bool fill = false);
 
   std::shared_ptr<cruzdb_proto::AfterImage> ReadAfterImage(uint64_t pos);
 
   std::map<uint64_t, CacheEntry> entry_cache_;
 
+  template<bool Forward>
   class Iterator {
    public:
-    Iterator(EntryService *entry_service, uint64_t pos);
-    boost::optional<std::pair<uint64_t,
-      EntryService::CacheEntry>> Next();
+    Iterator(EntryService *entry_service, uint64_t pos) :
+      pos_(pos),
+      stop_(false),
+      entry_service_(entry_service)
+    {}
+
+    virtual boost::optional<
+      std::pair<uint64_t, EntryService::CacheEntry>> NextEntry(bool fill = false)
+    {
+      const auto pos = advance();
+      auto entry = entry_service_->Read(pos, fill);
+      if (entry) {
+        return std::make_pair(pos, *entry);
+      }
+      return boost::none;
+    }
 
    private:
+    template<bool F = Forward, typename std::enable_if<F>::type* = nullptr>
+    inline uint64_t advance() {
+      return pos_++;
+    }
+
+    template<bool F = Forward, typename std::enable_if<!F>::type* = nullptr>
+    inline uint64_t advance() {
+      // the way this is setup is that we prep for the next read. so if we read
+      // pos 0, then pos goes to 2**64 with wrap around. need assertions in here
+      // etc...
+      return pos_--;
+    }
+
     uint64_t pos_;
     bool stop_;
     EntryService *entry_service_;
   };
 
-  class IntentionIterator : private EntryService::Iterator {
+  typedef EntryService::Iterator<false> ReverseIterator;
+
+  ReverseIterator NewReverseIterator(uint64_t pos) {
+    return ReverseIterator(this, pos);
+  }
+
+  class IntentionIterator : private EntryService::Iterator<true> {
    public:
     IntentionIterator(EntryService *entry_service, uint64_t pos);
     boost::optional<std::shared_ptr<Intention>> Next();
@@ -132,7 +167,7 @@ class EntryService {
 
   IntentionIterator NewIntentionIterator(uint64_t pos);
 
-  class AfterImageIterator : private EntryService::Iterator {
+  class AfterImageIterator : private EntryService::Iterator<true> {
    public:
     AfterImageIterator(EntryService *entry_service, uint64_t pos);
     boost::optional<std::pair<uint64_t,

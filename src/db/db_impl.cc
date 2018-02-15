@@ -23,10 +23,10 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
 {
   entry_service_->Start(point.replay_start_pos);
 
-  auto root = cache_.CacheAfterImage(point.after_image, point.after_image_pos);
+  auto root = cache_.CacheAfterImage(*point.after_image, point.after_image_pos);
   root_.replace(root);
 
-  root_snapshot_ = point.after_image.intention();
+  root_snapshot_ = point.after_image->intention();
   last_intention_processed_ = root_snapshot_;
 
   if (logger_)
@@ -81,84 +81,77 @@ Iterator *DBImpl::NewIterator(Snapshot *snapshot)
   return new FilteredPrefixIteratorImpl(PREFIX_USER, snapshot);
 }
 
-int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
+int DBImpl::FindRestorePoint(EntryService *entry_service, RestorePoint& point,
     uint64_t& latest_intention)
 {
-  uint64_t pos;
-  int ret = log->CheckTail(&pos);
-  assert(ret == 0);
+  // the true parameter tells the entry service to set max_pos according to the
+  // tail returned. this is important, because if this is a new log then tail
+  // will be zero pos, but the initialized log entries are present. since the
+  // log scanner hasn't been started, the entry service is in an idle state.
+  auto tail = entry_service->CheckTail(true);
 
   // log is empty?
-  if (pos == 0) {
+  if (tail == 0) {
     return -EINVAL;
   }
 
   // intention_pos -> earliest (ai_pos, ai_blob)
   std::unordered_map<uint64_t,
-    std::pair<uint64_t, cruzdb_proto::AfterImage>> after_images;
+    std::pair<uint64_t, std::shared_ptr<cruzdb_proto::AfterImage>>> after_images;
 
   bool set_latest_intention = false;
 
-  // scan log in reverse order
+  auto it = entry_service->NewReverseIterator(tail);
   while (true) {
-    std::string data;
-    ret = log->Read(pos, &data);
-    if (ret < 0) {
-      if (ret == -ENOENT) {
-        // see issue github #33
-        assert(pos > 0);
-        pos--;
-        continue;
-      }
-      assert(0);
-    }
+    auto entry = it.NextEntry(true);
+    // if hole, skip. see github issue #33
 
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
+    if (!entry)
+      break;
 
-    switch (entry.type()) {
-      case cruzdb_proto::LogEntry::INTENTION:
+    switch (entry->second.type) {
+      case EntryService::CacheEntry::EntryType::INTENTION:
        {
          if (!set_latest_intention) {
-           latest_intention = pos;
+           latest_intention = entry->first;
            set_latest_intention = true;
          }
 
-         auto it = after_images.find(pos);
+         auto it = after_images.find(entry->first);
          if (it != after_images.end()) {
            // found a starting point, but still need to guarantee that the
            // decision will remain valid: see github #33.
-           point.replay_start_pos = pos + 1;
+           point.replay_start_pos = entry->first + 1;
            point.after_image_pos = it->second.first;
            point.after_image = it->second.second;
-           assert(it->first == it->second.second.intention());
+           assert(it->first == it->second.second->intention());
            return 0;
          }
        }
        break;
 
        // find the oldest version of each after image
-      case cruzdb_proto::LogEntry::AFTER_IMAGE:
+      case EntryService::CacheEntry::EntryType::AFTERIMAGE:
         {
-          assert(pos > 0);
-          auto ai = entry.after_image();
-          auto it = after_images.find(ai.intention());
+          assert(entry->first > 0);
+          auto ai = entry->second.after_image;
+          auto it = after_images.find(ai->intention());
           if (it != after_images.end()) {
             after_images.erase(it);
           }
-          auto ret = after_images.emplace(ai.intention(), std::make_pair(pos, ai));
+          auto ret = after_images.emplace(ai->intention(),
+              std::make_pair(entry->first, ai));
           assert(ret.second);
         }
+        break;
+
+      case EntryService::CacheEntry::EntryType::FILLED:
         break;
 
       default:
         assert(0);
         exit(1);
     }
-
-    assert(pos > 0);
-    pos--;
   }
   assert(0);
   exit(1);

@@ -137,25 +137,6 @@ void EntryService::IOEntry()
   }
 }
 
-EntryService::Iterator::Iterator(
-    EntryService *entry_service, uint64_t pos) :
-  pos_(pos),
-  stop_(false),
-  entry_service_(entry_service)
-{
-}
-
-boost::optional<std::pair<uint64_t, EntryService::CacheEntry>>
-EntryService::Iterator::Next()
-{
-  const auto pos = pos_++;
-  auto entry = entry_service_->Read(pos);
-  if (entry) {
-    return std::make_pair(pos, *entry);
-  }
-  return boost::none;
-}
-
 EntryService::IntentionIterator
 EntryService::NewIntentionIterator(uint64_t pos)
 {
@@ -172,7 +153,7 @@ boost::optional<std::shared_ptr<Intention>>
 EntryService::IntentionIterator::Next()
 {
   while (true) {
-    auto entry = EntryService::Iterator::Next();
+    auto entry = NextEntry();
     if (entry) {
       if (entry->second.type == CacheEntry::EntryType::INTENTION)
         return entry->second.intention;
@@ -199,7 +180,7 @@ boost::optional<std::pair<uint64_t,
 EntryService::AfterImageIterator::Next()
 {
   while (true) {
-    auto entry = EntryService::Iterator::Next();
+    auto entry = NextEntry();
     if (entry) {
       if (entry->second.type == CacheEntry::EntryType::AFTERIMAGE)
         return std::make_pair(entry->first, entry->second.after_image);
@@ -209,7 +190,7 @@ EntryService::AfterImageIterator::Next()
   }
 }
 
-boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos)
+boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool fill)
 {
   std::unique_lock<std::mutex> lk(lock_);
 
@@ -241,7 +222,17 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos)
   while (true) {
     int ret = log_->Read(pos, &data);
     if (ret) {
-      if (ret == -ENOENT) {
+      if (ret == -ENODATA) {
+        CacheEntry cache_entry;
+        cache_entry.type = CacheEntry::EntryType::FILLED;
+        lk.lock();
+        auto p = entry_cache_.emplace(pos, cache_entry);
+        return p.first->second;
+      } else if (ret == -ENOENT) {
+        if (fill) {
+          ret = log_->Fill(pos);
+          assert(ret == 0 || ret == -EROFS);
+        }
         continue;
       }
       std::cerr << "read log failed " << ret << std::endl;
@@ -447,7 +438,7 @@ void EntryService::PrimaryAfterImageMatcher::gc()
   }
 }
 
-uint64_t EntryService::CheckTail()
+uint64_t EntryService::CheckTail(bool update_max_pos)
 {
   uint64_t pos;
   int ret = log_->CheckTail(&pos);
@@ -455,6 +446,13 @@ uint64_t EntryService::CheckTail()
     std::cerr << "failed to check tail" << std::endl;
     assert(0);
     exit(1);
+  }
+  if (update_max_pos) {
+    std::lock_guard<std::mutex> lk(lock_);
+    max_pos_ = std::max(max_pos_, pos);
+    for (auto& cond : tail_waiters_) {
+      cond->notify_one();
+    }
   }
   return pos;
 }
@@ -477,6 +475,7 @@ uint64_t EntryService::Append(cruzdb_proto::Intention& intention)
     assert(0);
     exit(1);
   }
+
   return pos;
 }
 
@@ -498,6 +497,7 @@ uint64_t EntryService::Append(cruzdb_proto::AfterImage& after_image)
     assert(0);
     exit(1);
   }
+
   return pos;
 }
 
