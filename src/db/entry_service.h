@@ -83,12 +83,6 @@ class EntryService {
 
   // NEW
 
-  // read the intentions in the provided set. this interface should be
-  // asychronous: the caller doesn't need the results in order, nor as a
-  // complete result set.
-  std::list<std::shared_ptr<Intention>> ReadIntentions(
-      std::vector<uint64_t> addrs);
-
   uint64_t CheckTail(bool update_max_pos = false);
 
   class CacheEntry {
@@ -181,6 +175,11 @@ class EntryService {
   // does not contain an afterimage at the position.
   std::shared_ptr<cruzdb_proto::AfterImage>
     ReadAfterImage(const uint64_t pos);
+
+  // Read intentions at the provided positions. It is a fatal error if any
+  // position does not contain an intention.
+  std::vector<std::shared_ptr<Intention>> ReadIntentions(
+      const std::vector<uint64_t>& positions);
   ////////////////////////////////////////////////////////////////
 
  private:

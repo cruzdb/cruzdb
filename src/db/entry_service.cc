@@ -245,59 +245,6 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool 
   return p.first->second;
 }
 
-// this api expects that the addresses being read fall below the actual tail of
-// the log. not that it is a problem, but it might influence the policy for hole
-// filling. or it might be an error here, since why would we even have a
-// reference to such an address?
-std::list<std::shared_ptr<Intention>>
-EntryService::ReadIntentions(std::vector<uint64_t> addrs)
-{
-  assert(!addrs.empty());
-  std::list<std::shared_ptr<Intention>> intentions;
-  std::vector<uint64_t> missing;
-
-  std::unique_lock<std::mutex> lk(lock_);
-  for (auto pos : addrs) {
-    auto it = entry_cache_.find(pos);
-    if (it != entry_cache_.end()) {
-      assert(it->second.type == CacheEntry::EntryType::INTENTION);
-      intentions.push_back(it->second.intention);
-    } else {
-      missing.push_back(pos);
-    }
-  }
-
-  lk.unlock();
-  for (auto pos : missing) {
-    // TODO: dump positions into an i/o queue...
-    std::string data;
-    int ret = log_->Read(pos, &data);
-    assert(ret == 0);
-
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
-    assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
-
-    // this is rather inefficient. below perhaps choose
-    // insert/insert_or_assign, etc... c++17
-    auto intention = std::make_shared<Intention>(
-        entry.intention(), pos);
-
-    CacheEntry cache_entry;
-    cache_entry.type = CacheEntry::EntryType::INTENTION;
-    cache_entry.intention = intention;
-
-    lk.lock();
-    auto p = entry_cache_.emplace(pos, cache_entry);
-    lk.unlock();
-
-    intentions.emplace_back(p.first->second.intention);
-  }
-
-  return intentions;
-}
-
 EntryService::PrimaryAfterImageMatcher::PrimaryAfterImageMatcher() :
   shutdown_(false),
   matched_watermark_(0)
@@ -544,6 +491,102 @@ EntryService::ReadAfterImage(const uint64_t pos)
         CacheEntry::EntryType::AFTERIMAGE);
     return p.first->second.after_image;
   }
+}
+
+std::vector<std::shared_ptr<Intention>>
+EntryService::ReadIntentions(const std::vector<uint64_t>& positions)
+{
+  std::vector<std::shared_ptr<Intention>> intentions;
+  std::vector<uint64_t> missing_positions;
+
+  // check cache
+  std::unique_lock<std::mutex> lk(lock_);
+  for (const auto pos : positions) {
+    auto it = entry_cache_.find(pos);
+    if (it != entry_cache_.end()) {
+      assert(it->second.type == CacheEntry::EntryType::INTENTION);
+      intentions.emplace_back(it->second.intention);
+    } else {
+      missing_positions.emplace_back(pos);
+    }
+  }
+  lk.unlock();
+
+  // dispatch async reads. we'll want to throttle this later in some way to deal
+  // with large requests for now the sizes seem reasonable.
+  std::vector<zlog::AioCompletion*> ios;
+  std::vector<std::string> blobs(missing_positions.size());
+  for (size_t i = 0; i < missing_positions.size(); i++) {
+    auto *c = zlog::Log::aio_create_completion();
+    ios.emplace_back(c);
+    int ret = log_->AioRead(missing_positions[i], c, &blobs[i]);
+    assert(ret == 0);
+  }
+
+  // wait for completions, and optional dispatch any retries
+  int delay = 1;
+  while (true) {
+    bool done = true;
+    for (size_t i = 0; i < ios.size(); i++) {
+      auto c = ios[i];
+      if (c) {
+        c->WaitForComplete();
+        int ioret = c->ReturnValue();
+        if (ioret == 0) {
+          ios[i] = nullptr;
+        } else if (ioret == -ENODATA) {
+          std::cerr << "unexpected log entry" << std::endl;
+          assert(0);
+          exit(1);
+        } else {
+          done = false;
+        }
+        delete c;
+      }
+    }
+
+    if (done)
+      break;
+
+    std::cerr << "batch reads failed, delay retry" << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    delay = std::min(delay*10, 1000);
+
+    for (size_t i = 0; i < ios.size(); i++) {
+      auto c = ios[i];
+      if (c) { // c is not valid, just a non-null flag
+        auto *c = zlog::Log::aio_create_completion();
+        ios[i] = c;
+        int ret = log_->AioRead(missing_positions[i], c, &blobs[i]);
+        assert(ret == 0);
+      }
+    }
+  }
+
+  for (size_t i = 0; i < blobs.size(); i++) {
+    std::cout << i << std::endl;
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(blobs[i]));
+    assert(entry.IsInitialized());
+    assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
+
+    // more efficient to use the interface in c++17 that doesn't construct the
+    // element being inserted into the cache unless it is being inserted.
+    auto intention = std::make_shared<Intention>(
+        entry.intention(), missing_positions[i]);
+
+    CacheEntry cache_entry;
+    cache_entry.type = CacheEntry::EntryType::INTENTION;
+    cache_entry.intention = intention;
+
+    lk.lock();
+    auto p = entry_cache_.emplace(missing_positions[i], cache_entry);
+    intentions.emplace_back(p.first->second.intention);
+    lk.unlock();
+  }
+
+  assert(intentions.size() == positions.size());
+  return std::move(intentions);
 }
 
 }
