@@ -36,34 +36,6 @@ void EntryService::Stop()
   io_thread_.join();
 }
 
-uint64_t EntryService::Append(std::unique_ptr<Intention> intention)
-{
-  uint64_t pos;
-  const auto blob = intention->Serialize();
-  int ret = log_->Append(blob, &pos);
-  if (ret) {
-    std::cerr << "log append failed" << std::endl;
-    assert(0);
-    exit(1);
-  }
-
-  intention->SetPosition(pos);
-
-  CacheEntry cache_entry;
-  cache_entry.type = CacheEntry::EntryType::INTENTION;
-  cache_entry.intention = std::move(intention);
-
-  std::lock_guard<std::mutex> lk(lock_);
-
-  entry_cache_.emplace(pos, cache_entry);
-  max_pos_ = std::max(max_pos_, pos);
-  for (auto& cond : tail_waiters_) {
-    cond->notify_one();
-  }
-
-  return pos;
-}
-
 void EntryService::IOEntry()
 {
   uint64_t next = pos_;
@@ -457,7 +429,22 @@ uint64_t EntryService::CheckTail(bool update_max_pos)
   return pos;
 }
 
-uint64_t EntryService::Append(cruzdb_proto::Intention& intention)
+uint64_t EntryService::Append(const std::string& data) const
+{
+  int delay = 1;
+  while (true) {
+    uint64_t pos;
+    int ret = log_->Append(data, &pos);
+    if (ret == 0) {
+      return pos;
+    }
+    std::cerr << "failed to append ret " << ret << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    delay = std::min(delay*10, 1000);
+  }
+}
+
+uint64_t EntryService::Append(cruzdb_proto::Intention& intention) const
 {
   cruzdb_proto::LogEntry entry;
   entry.set_type(cruzdb_proto::LogEntry::INTENTION);
@@ -468,18 +455,10 @@ uint64_t EntryService::Append(cruzdb_proto::Intention& intention)
   assert(entry.SerializeToString(&blob));
   entry.release_intention();
 
-  uint64_t pos;
-  int ret = log_->Append(blob, &pos);
-  if (ret) {
-    std::cerr << "failed to append intention" << std::endl;
-    assert(0);
-    exit(1);
-  }
-
-  return pos;
+  return Append(blob);
 }
 
-uint64_t EntryService::Append(cruzdb_proto::AfterImage& after_image)
+uint64_t EntryService::Append(cruzdb_proto::AfterImage& after_image) const
 {
   cruzdb_proto::LogEntry entry;
   entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
@@ -490,12 +469,25 @@ uint64_t EntryService::Append(cruzdb_proto::AfterImage& after_image)
   assert(entry.SerializeToString(&blob));
   entry.release_after_image();
 
-  uint64_t pos;
-  int ret = log_->Append(blob, &pos);
-  if (ret) {
-    std::cerr << "failed to append after image" << std::endl;
-    assert(0);
-    exit(1);
+  return Append(blob);
+}
+
+uint64_t EntryService::Append(std::unique_ptr<Intention> intention)
+{
+  const auto blob = intention->Serialize();
+
+  const auto pos = Append(blob);
+  intention->SetPosition(pos);
+
+  CacheEntry cache_entry;
+  cache_entry.type = CacheEntry::EntryType::INTENTION;
+  cache_entry.intention = std::move(intention);
+
+  std::lock_guard<std::mutex> lk(lock_);
+  entry_cache_.emplace(pos, cache_entry);
+  max_pos_ = std::max(max_pos_, pos);
+  for (auto& cond : tail_waiters_) {
+    cond->notify_one();
   }
 
   return pos;

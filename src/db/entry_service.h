@@ -89,10 +89,6 @@ class EntryService {
   std::list<std::shared_ptr<Intention>> ReadIntentions(
       std::vector<uint64_t> addrs);
 
-  uint64_t Append(cruzdb_proto::Intention& intention);
-  uint64_t Append(cruzdb_proto::AfterImage& after_image);
-
-  uint64_t Append(std::unique_ptr<Intention> intention);
   uint64_t CheckTail(bool update_max_pos = false);
 
   class CacheEntry {
@@ -178,7 +174,17 @@ class EntryService {
 
   void IOEntry();
 
+  ////////////////////////////////////////////////////////////////
+  uint64_t Append(cruzdb_proto::Intention& intention) const;
+  uint64_t Append(cruzdb_proto::AfterImage& after_image) const;
+  uint64_t Append(std::unique_ptr<Intention> intention);
+  ////////////////////////////////////////////////////////////////
+
  private:
+  ////////////////////////////////////////////////////////////////
+  uint64_t Append(const std::string& data) const;
+  ////////////////////////////////////////////////////////////////
+
   zlog::Log *log_;
   uint64_t pos_;
   bool stop_;
