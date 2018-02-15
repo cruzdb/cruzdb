@@ -36,6 +36,13 @@ void EntryService::Stop()
   io_thread_.join();
 }
 
+void EntryService::entry_cache_gc()
+{
+  while (entry_cache_.size() > 1000) {
+    entry_cache_.erase(entry_cache_.begin());
+  }
+}
+
 void EntryService::IOEntry()
 {
   uint64_t next = pos_;
@@ -97,6 +104,7 @@ void EntryService::IOEntry()
 
         lk.lock();
         entry_cache_.emplace(next, cache_entry);
+        entry_cache_gc();
         max_pos_ = std::max(max_pos_, next);
         for (auto& cond : tail_waiters_) {
           cond->notify_one();
@@ -199,6 +207,7 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool 
         cache_entry.type = CacheEntry::EntryType::FILLED;
         lk.lock();
         auto p = entry_cache_.emplace(pos, cache_entry);
+        entry_cache_gc();
         return p.first->second;
       } else if (ret == -ENOENT) {
         if (fill) {
@@ -242,6 +251,7 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool 
   lk.lock();
 
   auto p = entry_cache_.emplace(pos, cache_entry);
+  entry_cache_gc();
   return p.first->second;
 }
 
@@ -423,6 +433,7 @@ uint64_t EntryService::Append(std::unique_ptr<Intention> intention)
 
   std::lock_guard<std::mutex> lk(lock_);
   entry_cache_.emplace(pos, cache_entry);
+  entry_cache_gc();
   max_pos_ = std::max(max_pos_, pos);
   for (auto& cond : tail_waiters_) {
     cond->notify_one();
@@ -487,6 +498,7 @@ EntryService::ReadAfterImage(const uint64_t pos)
     // insert entry into the cache
     lk.lock();
     auto p = entry_cache_.emplace(pos, cache_entry);
+    entry_cache_gc();
     assert(p.first->second.type ==
         CacheEntry::EntryType::AFTERIMAGE);
     return p.first->second.after_image;
@@ -564,7 +576,6 @@ EntryService::ReadIntentions(const std::vector<uint64_t>& positions)
   }
 
   for (size_t i = 0; i < blobs.size(); i++) {
-    std::cout << i << std::endl;
     cruzdb_proto::LogEntry entry;
     assert(entry.ParseFromString(blobs[i]));
     assert(entry.IsInitialized());
@@ -581,6 +592,7 @@ EntryService::ReadIntentions(const std::vector<uint64_t>& positions)
 
     lk.lock();
     auto p = entry_cache_.emplace(missing_positions[i], cache_entry);
+    entry_cache_gc();
     intentions.emplace_back(p.first->second.intention);
     lk.unlock();
   }

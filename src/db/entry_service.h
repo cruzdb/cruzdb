@@ -81,10 +81,6 @@ class EntryService {
 
   PrimaryAfterImageMatcher ai_matcher;
 
-  // NEW
-
-  uint64_t CheckTail(bool update_max_pos = false);
-
   class CacheEntry {
    public:
     enum EntryType {
@@ -97,10 +93,6 @@ class EntryService {
     std::shared_ptr<Intention> intention;
     std::shared_ptr<cruzdb_proto::AfterImage> after_image;
   };
-
-  boost::optional<CacheEntry> Read(uint64_t pos, bool fill = false);
-
-  std::map<uint64_t, CacheEntry> entry_cache_;
 
   template<bool Forward>
   class Iterator {
@@ -164,9 +156,6 @@ class EntryService {
 
   AfterImageIterator NewAfterImageIterator(uint64_t pos);
 
-  void IOEntry();
-
-  ////////////////////////////////////////////////////////////////
   uint64_t Append(cruzdb_proto::Intention& intention) const;
   uint64_t Append(cruzdb_proto::AfterImage& after_image) const;
   uint64_t Append(std::unique_ptr<Intention> intention);
@@ -180,12 +169,20 @@ class EntryService {
   // position does not contain an intention.
   std::vector<std::shared_ptr<Intention>> ReadIntentions(
       const std::vector<uint64_t>& positions);
-  ////////////////////////////////////////////////////////////////
+
+  boost::optional<CacheEntry> Read(uint64_t pos, bool fill = false);
+
+  uint64_t CheckTail(bool update_max_pos = false);
 
  private:
-  ////////////////////////////////////////////////////////////////
+  void IOEntry();
   uint64_t Append(const std::string& data) const;
-  ////////////////////////////////////////////////////////////////
+
+  // this still needs a lot of work. we are just removing older log entries, but
+  // this doesn't necessarily correspond to any sort of real lru policy just as
+  // an exmaple.
+  std::map<uint64_t, CacheEntry> entry_cache_;
+  void entry_cache_gc();
 
   zlog::Log *log_;
   uint64_t pos_;
