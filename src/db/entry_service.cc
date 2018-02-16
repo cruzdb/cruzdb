@@ -4,15 +4,17 @@
 
 namespace cruzdb {
 
-EntryService::EntryService(zlog::Log *log, uint64_t pos,
-    std::mutex *db_lock) :
+EntryService::EntryService(zlog::Log *log) :
   log_(log),
-  pos_(pos),
   stop_(false),
-  db_lock_(db_lock),
-  log_reader_(std::thread(&EntryService::Run, this)),
-  intention_reader_(std::thread(&EntryService::IntentionReader, this))
+  max_pos_(0)
 {
+}
+
+void EntryService::Start(uint64_t pos)
+{
+  pos_ = pos;
+  io_thread_ = std::thread(&EntryService::IOEntry, this);
 }
 
 void EntryService::Stop()
@@ -24,270 +26,233 @@ void EntryService::Stop()
 
   ai_matcher.shutdown();
 
-  for (auto& q : intention_queues_) {
-    q->Stop();
+  {
+    std::lock_guard<std::mutex> l(lock_);
+    for (auto& cond : tail_waiters_) {
+      cond->notify_one();
+    }
   }
 
-  log_reader_.join();
-  intention_reader_.join();
+  io_thread_.join();
 }
 
-void EntryCache::Insert(std::unique_ptr<Intention> intention)
+void EntryService::entry_cache_gc()
 {
-  auto pos = intention->Position();
-  std::lock_guard<std::mutex> lk(lock_);
-  if (intentions_.size() > 10) {
-    intentions_.erase(intentions_.begin());
-  }
-  intentions_.emplace(pos, std::move(intention));
-}
-
-// obvs this is silly to return a copy. the cache should be storing shared
-// pointers or something like this.
-boost::optional<Intention> EntryCache::FindIntention(uint64_t pos)
-{
-  std::lock_guard<std::mutex> lk(lock_);
-  auto it = intentions_.find(pos);
-  if (it != intentions_.end()) {
-    return *(it->second);
-  }
-  return boost::none;
-}
-
-int EntryService::AppendIntention(std::unique_ptr<Intention> intention,
-    uint64_t *pos)
-{
-  const auto blob = intention->Serialize();
-  int ret = log_->Append(blob, pos);
-  if (ret == 0) {
-    intention->SetPosition(*pos);
-    cache_.Insert(std::move(intention));
-  }
-  return ret;
-}
-
-void EntryService::IntentionReader()
-{
-  uint64_t pos;
-  boost::optional<uint64_t> last_min_pos;
-
-  while (true) {
-    std::unique_lock<std::mutex> lk(lock_);
-
-    if (stop_)
-      return;
-
-    if (intention_queues_.empty()) {
-      last_min_pos = boost::none;
-      continue;
-    }
-
-    // min pos requested by any queue
-    auto min_pos = intention_queues_.front()->Position();
-    for (auto& q : intention_queues_) {
-      min_pos = std::min(min_pos, q->Position());
-    }
-
-    lk.unlock();
-
-    if (!last_min_pos) {
-      last_min_pos = min_pos;
-      pos = min_pos;
-    }
-
-    if (min_pos < *last_min_pos) {
-      last_min_pos = boost::none;
-      continue;
-    }
-
-    last_min_pos = min_pos;
-
-    // the cache may know that this pos is not an intention, and that additional
-    // slots in the log can be skipped over...
-    auto intention = cache_.FindIntention(pos);
-    if (intention) {
-      lk.lock();
-      for (auto& q : intention_queues_) {
-        if (pos >= q->Position()) {
-          q->Push(*intention);
-        }
-      }
-      lk.unlock();
-
-      pos++;
-      continue;
-    }
-
-    // obvs this should be populating the cache too..
-    std::string data;
-    int ret = log_->Read(pos, &data);
-    if (ret) {
-      if (ret == -ENOENT) {
-        continue;
-      }
-      assert(0);
-    }
-
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
-
-    switch (entry.type()) {
-      case cruzdb_proto::LogEntry::INTENTION:
-        lk.lock();
-        for (auto& q : intention_queues_) {
-          if (pos >= q->Position()) {
-            q->Push(Intention(entry.intention(), pos));
-          }
-        }
-        lk.unlock();
-        break;
-
-      case cruzdb_proto::LogEntry::AFTER_IMAGE:
-        break;
-
-      default:
-        assert(0);
-        exit(1);
-    }
-
-    pos++;
+  while (entry_cache_.size() > 1000) {
+    entry_cache_.erase(entry_cache_.begin());
   }
 }
 
-void EntryService::Run()
+void EntryService::IOEntry()
 {
+  uint64_t next = pos_;
+
   while (true) {
     {
-      std::lock_guard<std::mutex> l(lock_);
+      std::lock_guard<std::mutex> lk(lock_);
       if (stop_)
-        return;
+        break;
     }
+    auto tail = CheckTail();
+    assert(next <= tail);
+    if (next == tail) {
+      std::this_thread::sleep_for(std::chrono::microseconds(1000));
+      continue;
+    }
+    while (next < tail) {
+      std::unique_lock<std::mutex> lk(lock_);
+      auto it = entry_cache_.find(next);
+      if (it == entry_cache_.end()) {
+        lk.unlock();
+        std::string data;
+        int ret = log_->Read(next, &data);
+        if (ret) {
+          if (ret == -ENOENT) {
+            // we aren't going to spin on the tail, but we haven't yet implemented
+            // a fill policy, and really we shouldn't have holes in our
+            // single-node setup, so we just spin on the hole for now...
+            continue;
+          }
+          assert(0);
+        }
 
-    std::string data;
+        cruzdb_proto::LogEntry entry;
+        assert(entry.ParseFromString(data));
+        assert(entry.IsInitialized());
 
-    // need to fill log positions. this is because it is important that any
-    // after image that is currently the first occurence following its
-    // intention, remains that way.
-    int ret = log_->Read(pos_, &data);
-    if (ret) {
-      // TODO: be smart about reading. we shouldn't wait one second, and we
-      // should sometimes fill holes. the current infrastructure won't generate
-      // holes in testing, so this will work for now.
-      if (ret == -ENOENT) {
-        /*
-         * TODO: currently we can run into a soft lockup where the log reader is
-         * spinning on a position that hasn't been written. that's weird, since
-         * we aren't observing any failed clients or sequencer or anything, so
-         * every position should be written.
-         *
-         * what might be happening.. is that there is a hole, but the entity
-         * assigned to fill that hole is waiting on something a bit further
-         * ahead in the log, so no progress is being made...
-         *
-         * lets get a confirmation about the state here so we can record this
-         * case. it would be an interesting case.
-         *
-         * do timeout waits so we can see with print statements...
-         */
-        continue;
+        CacheEntry cache_entry;
+
+        switch (entry.type()) {
+          case cruzdb_proto::LogEntry::AFTER_IMAGE:
+            cache_entry.type = CacheEntry::EntryType::AFTERIMAGE;
+            cache_entry.after_image =
+              std::make_shared<cruzdb_proto::AfterImage>(
+                  std::move(entry.after_image()));
+            ai_matcher.push(entry.after_image(), next);
+            break;
+
+          case cruzdb_proto::LogEntry::INTENTION:
+            cache_entry.type = CacheEntry::EntryType::INTENTION;
+            cache_entry.intention = std::make_shared<Intention>(
+                entry.intention(), next);
+            break;
+
+          default:
+            assert(0);
+            exit(1);
+        }
+
+        lk.lock();
+        entry_cache_.emplace(next, cache_entry);
+        entry_cache_gc();
+        max_pos_ = std::max(max_pos_, next);
+        for (auto& cond : tail_waiters_) {
+          cond->notify_one();
+        }
+        lk.unlock();
       }
-      assert(0);
+
+      next++;
     }
-
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
-
-    // TODO: look into using Arena allocation in protobufs, or moving to
-    // flatbuffers. we basically want to avoid all the copying here, by doing
-    // something like pushing a pointer onto these lists, or using move
-    // semantics.
-    switch (entry.type()) {
-      case cruzdb_proto::LogEntry::AFTER_IMAGE:
-        ai_matcher.push(entry.after_image(), pos_);
-        break;
-
-      case cruzdb_proto::LogEntry::INTENTION:
-        break;
-
-      default:
-        assert(0);
-        exit(1);
-    }
-
-    pos_++;
   }
 }
 
-EntryService::IntentionQueue *EntryService::NewIntentionQueue(uint64_t pos)
+EntryService::IntentionIterator
+EntryService::NewIntentionIterator(uint64_t pos)
 {
-  auto queue = std::make_unique<IntentionQueue>(pos);
-  auto ret = queue.get();
-  std::lock_guard<std::mutex> lk(lock_);
-  intention_queues_.emplace_back(std::move(queue));
-  return ret;
+  return IntentionIterator(this, pos);
 }
 
-EntryService::IntentionQueue::IntentionQueue(uint64_t pos) :
-  pos_(pos),
-  stop_(false)
+EntryService::IntentionIterator::IntentionIterator(
+    EntryService *entry_service, uint64_t pos) :
+  Iterator(entry_service, pos)
 {
 }
 
-void EntryService::IntentionQueue::Stop()
+boost::optional<std::shared_ptr<Intention>>
+EntryService::IntentionIterator::Next()
 {
-  {
-    std::lock_guard<std::mutex> lk(lock_);
-    stop_ = true;
+  while (true) {
+    auto entry = NextEntry();
+    if (entry) {
+      if (entry->second.type == CacheEntry::EntryType::INTENTION)
+        return entry->second.intention;
+    } else {
+      return boost::none;
+    }
   }
-  cond_.notify_all();
 }
 
-boost::optional<Intention> EntryService::IntentionQueue::Wait()
+EntryService::AfterImageIterator
+EntryService::NewAfterImageIterator(uint64_t pos)
+{
+  return AfterImageIterator(this, pos);
+}
+
+EntryService::AfterImageIterator::AfterImageIterator(
+    EntryService *entry_service, uint64_t pos) :
+  Iterator(entry_service, pos)
+{
+}
+
+boost::optional<std::pair<uint64_t,
+  std::shared_ptr<cruzdb_proto::AfterImage>>>
+EntryService::AfterImageIterator::Next()
+{
+  while (true) {
+    auto entry = NextEntry();
+    if (entry) {
+      if (entry->second.type == CacheEntry::EntryType::AFTERIMAGE)
+        return std::make_pair(entry->first, entry->second.after_image);
+    } else {
+      return boost::none;
+    }
+  }
+}
+
+boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool fill)
 {
   std::unique_lock<std::mutex> lk(lock_);
-  cond_.wait(lk, [this] { return !q_.empty() || stop_; });
-  if (stop_) {
-    return boost::none;
+
+  // check cache for target position
+  auto it = entry_cache_.find(pos);
+  if (it != entry_cache_.end()) {
+    return it->second;
   }
-  assert(!q_.empty());
-  auto i = q_.front();
-  q_.pop();
-  return i;
-}
 
-uint64_t EntryService::IntentionQueue::Position() const
-{
-  std::lock_guard<std::mutex> lk(lock_);
-  return pos_;
-}
+  // if position is larger than any added to the cache so far, wait to be
+  // notified when the position has been read by the log scanner.
+  if (pos > max_pos_) {
+    std::condition_variable cond;
+    tail_waiters_.emplace_back(&cond);
+    auto cit = tail_waiters_.end();
+    cit--;
+    cond.wait(lk, [&] { return pos <= max_pos_ || stop_; });
+    tail_waiters_.erase(cit);
+    if (stop_)
+      return boost::none;
+  }
 
-void EntryService::IntentionQueue::Push(Intention intention)
-{
-  std::lock_guard<std::mutex> lk(lock_);
-  assert(pos_ <= intention.Position());
-  pos_ = intention.Position() + 1;
-  q_.emplace(intention);
-  cond_.notify_one();
-}
+  lk.unlock();
 
-std::list<Intention>
-EntryService::ReadIntentions(std::vector<uint64_t> addrs)
-{
-  std::list<Intention> intentions;
-  assert(!addrs.empty());
-  for (auto pos : addrs) {
-    std::string data;
+  // mm... still we see an occasional hole that should be temporary in the
+  // current setups. this tight loop is bad. we'll be moving to a different way
+  // to do io retries and filling later...
+  std::string data;
+  while (true) {
     int ret = log_->Read(pos, &data);
-    assert(ret == 0);
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
-    assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
-    intentions.emplace_back(Intention(entry.intention(), pos));
+    if (ret) {
+      if (ret == -ENODATA) {
+        CacheEntry cache_entry;
+        cache_entry.type = CacheEntry::EntryType::FILLED;
+        lk.lock();
+        auto p = entry_cache_.emplace(pos, cache_entry);
+        entry_cache_gc();
+        return p.first->second;
+      } else if (ret == -ENOENT) {
+        if (fill) {
+          ret = log_->Fill(pos);
+          assert(ret == 0 || ret == -EROFS);
+        }
+        continue;
+      }
+      std::cerr << "read log failed " << ret << std::endl;
+      assert(0);
+      exit(1);
+    }
+    break;
   }
-  return intentions;
+
+  cruzdb_proto::LogEntry entry;
+  assert(entry.ParseFromString(data));
+  assert(entry.IsInitialized());
+
+  CacheEntry cache_entry;
+
+  switch (entry.type()) {
+    case cruzdb_proto::LogEntry::AFTER_IMAGE:
+      cache_entry.type = CacheEntry::EntryType::AFTERIMAGE;
+      cache_entry.after_image =
+        std::make_shared<cruzdb_proto::AfterImage>(
+            std::move(entry.after_image()));
+      break;
+
+    case cruzdb_proto::LogEntry::INTENTION:
+      cache_entry.type = CacheEntry::EntryType::INTENTION;
+      cache_entry.intention = std::make_shared<Intention>(
+          entry.intention(), pos);
+      break;
+
+    default:
+      assert(0);
+      exit(1);
+  }
+
+  lk.lock();
+
+  auto p = entry_cache_.emplace(pos, cache_entry);
+  entry_cache_gc();
+  return p.first->second;
 }
 
 EntryService::PrimaryAfterImageMatcher::PrimaryAfterImageMatcher() :
@@ -393,11 +358,247 @@ void EntryService::PrimaryAfterImageMatcher::gc()
   }
 }
 
-void EntryService::AppendAfterImageAsync(const std::string& blob)
+uint64_t EntryService::CheckTail(bool update_max_pos)
 {
-  uint64_t afterimage_pos;
-  int ret = log_->Append(blob, &afterimage_pos);
-  assert(ret == 0);
+  uint64_t pos;
+  int ret = log_->CheckTail(&pos);
+  if (ret) {
+    std::cerr << "failed to check tail" << std::endl;
+    assert(0);
+    exit(1);
+  }
+  if (update_max_pos) {
+    std::lock_guard<std::mutex> lk(lock_);
+    max_pos_ = std::max(max_pos_, pos);
+    for (auto& cond : tail_waiters_) {
+      cond->notify_one();
+    }
+  }
+  return pos;
+}
+
+uint64_t EntryService::Append(const std::string& data) const
+{
+  int delay = 1;
+  while (true) {
+    uint64_t pos;
+    int ret = log_->Append(data, &pos);
+    if (ret == 0) {
+      return pos;
+    }
+    std::cerr << "failed to append ret " << ret << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    delay = std::min(delay*10, 1000);
+  }
+}
+
+uint64_t EntryService::Append(cruzdb_proto::Intention& intention) const
+{
+  cruzdb_proto::LogEntry entry;
+  entry.set_type(cruzdb_proto::LogEntry::INTENTION);
+  entry.set_allocated_intention(&intention);
+  assert(entry.IsInitialized());
+
+  std::string blob;
+  assert(entry.SerializeToString(&blob));
+  entry.release_intention();
+
+  return Append(blob);
+}
+
+uint64_t EntryService::Append(cruzdb_proto::AfterImage& after_image) const
+{
+  cruzdb_proto::LogEntry entry;
+  entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
+  entry.set_allocated_after_image(&after_image);
+  assert(entry.IsInitialized());
+
+  std::string blob;
+  assert(entry.SerializeToString(&blob));
+  entry.release_after_image();
+
+  return Append(blob);
+}
+
+uint64_t EntryService::Append(std::unique_ptr<Intention> intention)
+{
+  const auto blob = intention->Serialize();
+
+  const auto pos = Append(blob);
+  intention->SetPosition(pos);
+
+  CacheEntry cache_entry;
+  cache_entry.type = CacheEntry::EntryType::INTENTION;
+  cache_entry.intention = std::move(intention);
+
+  std::lock_guard<std::mutex> lk(lock_);
+  entry_cache_.emplace(pos, cache_entry);
+  entry_cache_gc();
+  max_pos_ = std::max(max_pos_, pos);
+  for (auto& cond : tail_waiters_) {
+    cond->notify_one();
+  }
+
+  return pos;
+}
+
+std::shared_ptr<cruzdb_proto::AfterImage>
+EntryService::ReadAfterImage(const uint64_t pos)
+{
+  std::unique_lock<std::mutex> lk(lock_);
+
+  // check for afterimage in the cache
+  auto it = entry_cache_.find(pos);
+  if (it != entry_cache_.end()) {
+    assert(it->second.type ==
+        CacheEntry::EntryType::AFTERIMAGE);
+    return it->second.after_image;
+  }
+
+  lk.unlock();
+
+  int delay = 1;
+  while (true) {
+    std::string data;
+    int ret = log_->Read(pos, &data);
+    if (ret) {
+      if (ret == -ENODATA) {
+        // a filled entry will never be an afterimage
+        std::cerr << "unexpected log entry" << std::endl;
+        assert(0);
+        exit(1);
+      }
+      // try again with increasing delay
+      std::cerr << "failed to read pos " << pos << " ret " << ret << std::endl;
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+      delay = std::min(delay*10, 1000);
+      continue;
+    }
+
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+
+    CacheEntry cache_entry;
+    switch (entry.type()) {
+      case cruzdb_proto::LogEntry::AFTER_IMAGE:
+        cache_entry.type = CacheEntry::EntryType::AFTERIMAGE;
+        cache_entry.after_image =
+          std::make_shared<cruzdb_proto::AfterImage>(
+              std::move(entry.after_image()));
+        break;
+
+      case cruzdb_proto::LogEntry::INTENTION:
+      default:
+        std::cerr << "unexpected log entry" << std::endl;
+        assert(0);
+        exit(1);
+    }
+
+    // insert entry into the cache
+    lk.lock();
+    auto p = entry_cache_.emplace(pos, cache_entry);
+    entry_cache_gc();
+    assert(p.first->second.type ==
+        CacheEntry::EntryType::AFTERIMAGE);
+    return p.first->second.after_image;
+  }
+}
+
+std::vector<std::shared_ptr<Intention>>
+EntryService::ReadIntentions(const std::vector<uint64_t>& positions)
+{
+  std::vector<std::shared_ptr<Intention>> intentions;
+  std::vector<uint64_t> missing_positions;
+
+  // check cache
+  std::unique_lock<std::mutex> lk(lock_);
+  for (const auto pos : positions) {
+    auto it = entry_cache_.find(pos);
+    if (it != entry_cache_.end()) {
+      assert(it->second.type == CacheEntry::EntryType::INTENTION);
+      intentions.emplace_back(it->second.intention);
+    } else {
+      missing_positions.emplace_back(pos);
+    }
+  }
+  lk.unlock();
+
+  // dispatch async reads. we'll want to throttle this later in some way to deal
+  // with large requests for now the sizes seem reasonable.
+  std::vector<zlog::AioCompletion*> ios;
+  std::vector<std::string> blobs(missing_positions.size());
+  for (size_t i = 0; i < missing_positions.size(); i++) {
+    auto *c = zlog::Log::aio_create_completion();
+    ios.emplace_back(c);
+    int ret = log_->AioRead(missing_positions[i], c, &blobs[i]);
+    assert(ret == 0);
+  }
+
+  // wait for completions, and optional dispatch any retries
+  int delay = 1;
+  while (true) {
+    bool done = true;
+    for (size_t i = 0; i < ios.size(); i++) {
+      auto c = ios[i];
+      if (c) {
+        c->WaitForComplete();
+        int ioret = c->ReturnValue();
+        if (ioret == 0) {
+          ios[i] = nullptr;
+        } else if (ioret == -ENODATA) {
+          std::cerr << "unexpected log entry" << std::endl;
+          assert(0);
+          exit(1);
+        } else {
+          done = false;
+        }
+        delete c;
+      }
+    }
+
+    if (done)
+      break;
+
+    std::cerr << "batch reads failed, delay retry" << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    delay = std::min(delay*10, 1000);
+
+    for (size_t i = 0; i < ios.size(); i++) {
+      auto c = ios[i];
+      if (c) { // c is not valid, just a non-null flag
+        auto *c = zlog::Log::aio_create_completion();
+        ios[i] = c;
+        int ret = log_->AioRead(missing_positions[i], c, &blobs[i]);
+        assert(ret == 0);
+      }
+    }
+  }
+
+  for (size_t i = 0; i < blobs.size(); i++) {
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(blobs[i]));
+    assert(entry.IsInitialized());
+    assert(entry.type() == cruzdb_proto::LogEntry::INTENTION);
+
+    // more efficient to use the interface in c++17 that doesn't construct the
+    // element being inserted into the cache unless it is being inserted.
+    auto intention = std::make_shared<Intention>(
+        entry.intention(), missing_positions[i]);
+
+    CacheEntry cache_entry;
+    cache_entry.type = CacheEntry::EntryType::INTENTION;
+    cache_entry.intention = intention;
+
+    lk.lock();
+    auto p = entry_cache_.emplace(missing_positions[i], cache_entry);
+    entry_cache_gc();
+    intentions.emplace_back(p.first->second.intention);
+    lk.unlock();
+  }
+
+  assert(intentions.size() == positions.size());
+  return std::move(intentions);
 }
 
 }

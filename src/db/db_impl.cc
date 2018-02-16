@@ -8,22 +8,25 @@
 namespace cruzdb {
 
 DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
+    std::unique_ptr<EntryService> entry_service,
     std::shared_ptr<spdlog::logger> logger) :
   log_(log),
   cache_(log, this),
   stop_(false),
-  entry_service_(log, point.replay_start_pos, &lock_),
-  intention_queue_(entry_service_.NewIntentionQueue(point.replay_start_pos)),
+  entry_service_(std::move(entry_service)),
+  intention_iterator_(entry_service_->NewIntentionIterator(point.replay_start_pos)),
   in_flight_txn_rid_(-1),
   root_(Node::Nil(), this),
   metrics_http_server_({"listening_ports", "0.0.0.0:8080", "num_threads", "1"}),
   metrics_handler_(this),
   logger_(logger)
 {
-  auto root = cache_.CacheAfterImage(point.after_image, point.after_image_pos);
+  entry_service_->Start(point.replay_start_pos);
+
+  auto root = cache_.CacheAfterImage(*point.after_image, point.after_image_pos);
   root_.replace(root);
 
-  root_snapshot_ = point.after_image.intention();
+  root_snapshot_ = point.after_image->intention();
   last_intention_processed_ = root_snapshot_;
 
   if (logger_)
@@ -48,7 +51,7 @@ DBImpl::~DBImpl()
   janitor_cond_.notify_one();
   janitor_thread_.join();
 
-  entry_service_.Stop();
+  entry_service_->Stop();
 
   lcs_trees_cond_.notify_one();
 
@@ -78,84 +81,77 @@ Iterator *DBImpl::NewIterator(Snapshot *snapshot)
   return new FilteredPrefixIteratorImpl(PREFIX_USER, snapshot);
 }
 
-int DBImpl::FindRestorePoint(zlog::Log *log, RestorePoint& point,
+int DBImpl::FindRestorePoint(EntryService *entry_service, RestorePoint& point,
     uint64_t& latest_intention)
 {
-  uint64_t pos;
-  int ret = log->CheckTail(&pos);
-  assert(ret == 0);
+  // the true parameter tells the entry service to set max_pos according to the
+  // tail returned. this is important, because if this is a new log then tail
+  // will be zero pos, but the initialized log entries are present. since the
+  // log scanner hasn't been started, the entry service is in an idle state.
+  auto tail = entry_service->CheckTail(true);
 
   // log is empty?
-  if (pos == 0) {
+  if (tail == 0) {
     return -EINVAL;
   }
 
   // intention_pos -> earliest (ai_pos, ai_blob)
   std::unordered_map<uint64_t,
-    std::pair<uint64_t, cruzdb_proto::AfterImage>> after_images;
+    std::pair<uint64_t, std::shared_ptr<cruzdb_proto::AfterImage>>> after_images;
 
   bool set_latest_intention = false;
 
-  // scan log in reverse order
+  auto it = entry_service->NewReverseIterator(tail);
   while (true) {
-    std::string data;
-    ret = log->Read(pos, &data);
-    if (ret < 0) {
-      if (ret == -ENOENT) {
-        // see issue github #33
-        assert(pos > 0);
-        pos--;
-        continue;
-      }
-      assert(0);
-    }
+    auto entry = it.NextEntry(true);
+    // if hole, skip. see github issue #33
 
-    cruzdb_proto::LogEntry entry;
-    assert(entry.ParseFromString(data));
-    assert(entry.IsInitialized());
+    if (!entry)
+      break;
 
-    switch (entry.type()) {
-      case cruzdb_proto::LogEntry::INTENTION:
+    switch (entry->second.type) {
+      case EntryService::CacheEntry::EntryType::INTENTION:
        {
          if (!set_latest_intention) {
-           latest_intention = pos;
+           latest_intention = entry->first;
            set_latest_intention = true;
          }
 
-         auto it = after_images.find(pos);
+         auto it = after_images.find(entry->first);
          if (it != after_images.end()) {
            // found a starting point, but still need to guarantee that the
            // decision will remain valid: see github #33.
-           point.replay_start_pos = pos + 1;
+           point.replay_start_pos = entry->first + 1;
            point.after_image_pos = it->second.first;
            point.after_image = it->second.second;
-           assert(it->first == it->second.second.intention());
+           assert(it->first == it->second.second->intention());
            return 0;
          }
        }
        break;
 
        // find the oldest version of each after image
-      case cruzdb_proto::LogEntry::AFTER_IMAGE:
+      case EntryService::CacheEntry::EntryType::AFTERIMAGE:
         {
-          assert(pos > 0);
-          auto ai = entry.after_image();
-          auto it = after_images.find(ai.intention());
+          assert(entry->first > 0);
+          auto ai = entry->second.after_image;
+          auto it = after_images.find(ai->intention());
           if (it != after_images.end()) {
             after_images.erase(it);
           }
-          auto ret = after_images.emplace(ai.intention(), std::make_pair(pos, ai));
+          auto ret = after_images.emplace(ai->intention(),
+              std::make_pair(entry->first, ai));
           assert(ret.second);
         }
+        break;
+
+      case EntryService::CacheEntry::EntryType::FILLED:
         break;
 
       default:
         assert(0);
         exit(1);
     }
-
-    assert(pos > 0);
-    pos--;
   }
   assert(0);
   exit(1);
@@ -312,11 +308,11 @@ bool DBImpl::ProcessConcurrentIntention(const Intention& intention)
     }
   }
 
-  auto other_intentions = entry_service_.ReadIntentions(irange.first);
+  auto other_intentions = entry_service_->ReadIntentions(irange.first);
 
   for (auto& other_intention : other_intentions) {
     // set of keys modified by the intention in the conflict zone
-    auto other_intention_keys = other_intention.UpdateOpKeys();
+    auto other_intention_keys = other_intention->UpdateOpKeys();
 
     // return abort=true if the set of keys intersect
     for (auto k0 : intention_keys) {
@@ -366,10 +362,11 @@ void DBImpl::TransactionProcessorEntry()
 {
   while (true) {
     // next intention to process
-    const auto intention = intention_queue_->Wait();
-    if (!intention) {
+    const auto opt_intention = intention_iterator_.Next();
+    if (!opt_intention) {
       break;
     }
+    const auto intention = *opt_intention;
     const auto intention_pos = intention->Position();
 
     if (logger_)
@@ -494,22 +491,14 @@ void DBImpl::AfterImageWriterEntry()
       tree->SerializeAfterImage(after_image, intention_pos, delta);
       assert(after_image.intention() == intention_pos);
 
-      std::string blob;
-      cruzdb_proto::LogEntry entry;
-      entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
-      entry.set_allocated_after_image(&after_image);
-      assert(entry.IsInitialized());
-      assert(entry.SerializeToString(&blob));
-      entry.release_after_image();
-
-      entry_service_.ai_matcher.watch(std::move(delta), std::move(tree));
+      entry_service_->ai_matcher.watch(std::move(delta), std::move(tree));
 
       // in its current form, this isn't actually async because there is very
       // little, if any, benefit from actual AIO with the LMDB/RAM backends. for
       // for other backends the benefit is huge. other optimizations like not
       // writing the after image if we already know about it by looking at the
       // dedup index.
-      entry_service_.AppendAfterImageAsync(blob);
+      entry_service_->Append(after_image);
     }
 
     lk.lock();
@@ -519,7 +508,7 @@ void DBImpl::AfterImageWriterEntry()
 void DBImpl::AfterImageFinalizerEntry()
 {
   while (true) {
-    auto tree_info = entry_service_.ai_matcher.match();
+    auto tree_info = entry_service_->ai_matcher.match();
     if (!tree_info.second)
       break;
 
@@ -551,10 +540,7 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   txn_finder_.AddTokenWaiter(waiter, token);
 
   // MOVE txn's intention to the append io service
-  uint64_t pos;
-  auto ret = entry_service_.AppendIntention(
-      std::move(txn->GetIntention()), &pos);
-  assert(ret == 0);
+  auto pos = entry_service_->Append(std::move(txn->GetIntention()));
 
   // MOVE txn's tree into index for txn processor
   auto tree = std::move(txn->Tree());

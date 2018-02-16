@@ -2,6 +2,7 @@
 #include <condition_variable>
 #include <list>
 #include <mutex>
+#include <functional>
 #include <queue>
 #include <thread>
 #include <boost/optional.hpp>
@@ -11,72 +12,14 @@
 
 namespace cruzdb {
 
-// one critical method for increasing performance is to eliminate as much
-// blocking on io as possible. for example, when a transaction finishes it
-// writes an intention to the log. once that intention is written it becomes
-// immutable. so during replay, it doesn't matter if the source of an intention
-// is the log or an already existing, identical version in memory. the same
-// holds true for any other type of entry in the log. the entry cache is a write
-// through cache that can be consulted before going to the log for a particular
-// log entry.
-//
-// there is potential for some very interesting enhancements to the entry cache.
-// for example, in addition to an in-memory cache being a single layer above the
-// log, we can introduce a cache on local devices using something like lmdb.
-// another enhancement is to create a distributed cache connected to peer nodes.
-// when multiple nodes are submitting transactions, every other node needs to
-// read intentions in log order. however, it may be orders of magnitude faster
-// to retreive / push entries across the network using rdma than go to the log.
-class EntryCache {
- public:
-  void Insert(std::unique_ptr<Intention> intention);
-  boost::optional<Intention> FindIntention(uint64_t pos);
-
- private:
-  std::mutex lock_;
-  std::map<uint64_t, std::unique_ptr<Intention>> intentions_;
-};
-
 class EntryService {
  public:
-  EntryService(zlog::Log *log, uint64_t pos,
-      std::mutex *db_lock);
+  explicit EntryService(zlog::Log *log);
 
+  void Start(uint64_t pos);
   void Stop();
 
  public:
-  int AppendIntention(std::unique_ptr<Intention> intention, uint64_t *pos);
-
-  class IntentionQueue {
-   public:
-    explicit IntentionQueue(uint64_t pos);
-
-    void Stop();
-    boost::optional<Intention> Wait();
-
-   private:
-    friend class EntryService;
-
-    uint64_t Position() const;
-    void Push(Intention intention);
-
-    mutable std::mutex lock_;
-    uint64_t pos_;
-    bool stop_;
-    std::queue<Intention> q_;
-    std::condition_variable cond_;
-  };
-
-  // create a non-owning intention queue. the queue can be used to access all
-  // intentions in their log order, starting at the provided position. the queue
-  // will remain valid until the entry service is destroyed.
-  IntentionQueue *NewIntentionQueue(uint64_t pos);
-
-  // read the intentions in the provided set. this interface should be
-  // asychronous: the caller doesn't need the results in order, nor as a
-  // complete result set.
-  std::list<Intention> ReadIntentions(std::vector<uint64_t> addrs);
-
   // matches intentions with their primary afterimage in the log
   class PrimaryAfterImageMatcher {
    public:
@@ -138,25 +81,118 @@ class EntryService {
 
   PrimaryAfterImageMatcher ai_matcher;
 
-  void AppendAfterImageAsync(const std::string& blob);
+  class CacheEntry {
+   public:
+    enum EntryType {
+      INTENTION,
+      AFTERIMAGE,
+      FILLED
+    };
+
+    EntryType type;
+    std::shared_ptr<Intention> intention;
+    std::shared_ptr<cruzdb_proto::AfterImage> after_image;
+  };
+
+  template<bool Forward>
+  class Iterator {
+   public:
+    Iterator(EntryService *entry_service, uint64_t pos) :
+      pos_(pos),
+      stop_(false),
+      entry_service_(entry_service)
+    {}
+
+    virtual boost::optional<
+      std::pair<uint64_t, EntryService::CacheEntry>> NextEntry(bool fill = false)
+    {
+      const auto pos = advance();
+      auto entry = entry_service_->Read(pos, fill);
+      if (entry) {
+        return std::make_pair(pos, *entry);
+      }
+      return boost::none;
+    }
+
+   private:
+    template<bool F = Forward, typename std::enable_if<F>::type* = nullptr>
+    inline uint64_t advance() {
+      return pos_++;
+    }
+
+    template<bool F = Forward, typename std::enable_if<!F>::type* = nullptr>
+    inline uint64_t advance() {
+      // the way this is setup is that we prep for the next read. so if we read
+      // pos 0, then pos goes to 2**64 with wrap around. need assertions in here
+      // etc...
+      return pos_--;
+    }
+
+    uint64_t pos_;
+    bool stop_;
+    EntryService *entry_service_;
+  };
+
+  typedef EntryService::Iterator<false> ReverseIterator;
+
+  ReverseIterator NewReverseIterator(uint64_t pos) {
+    return ReverseIterator(this, pos);
+  }
+
+  class IntentionIterator : private EntryService::Iterator<true> {
+   public:
+    IntentionIterator(EntryService *entry_service, uint64_t pos);
+    boost::optional<std::shared_ptr<Intention>> Next();
+  };
+
+  IntentionIterator NewIntentionIterator(uint64_t pos);
+
+  class AfterImageIterator : private EntryService::Iterator<true> {
+   public:
+    AfterImageIterator(EntryService *entry_service, uint64_t pos);
+    boost::optional<std::pair<uint64_t,
+      std::shared_ptr<cruzdb_proto::AfterImage>>> Next();
+  };
+
+  AfterImageIterator NewAfterImageIterator(uint64_t pos);
+
+  uint64_t Append(cruzdb_proto::Intention& intention) const;
+  uint64_t Append(cruzdb_proto::AfterImage& after_image) const;
+  uint64_t Append(std::unique_ptr<Intention> intention);
+
+  // Read an afterimage at the provided position. It is a fatal error if the log
+  // does not contain an afterimage at the position.
+  std::shared_ptr<cruzdb_proto::AfterImage>
+    ReadAfterImage(const uint64_t pos);
+
+  // Read intentions at the provided positions. It is a fatal error if any
+  // position does not contain an intention.
+  std::vector<std::shared_ptr<Intention>> ReadIntentions(
+      const std::vector<uint64_t>& positions);
+
+  boost::optional<CacheEntry> Read(uint64_t pos, bool fill = false);
+
+  uint64_t CheckTail(bool update_max_pos = false);
 
  private:
-  void Run();
-  void IntentionReader();
+  void IOEntry();
+  uint64_t Append(const std::string& data) const;
+
+  // this still needs a lot of work. we are just removing older log entries, but
+  // this doesn't necessarily correspond to any sort of real lru policy just as
+  // an exmaple.
+  std::map<uint64_t, CacheEntry> entry_cache_;
+  void entry_cache_gc();
 
   zlog::Log *log_;
   uint64_t pos_;
   bool stop_;
   std::mutex lock_;
 
-  std::mutex *db_lock_;
+  uint64_t max_pos_;
+  std::list<std::condition_variable*> tail_waiters_;
 
-  std::list<std::unique_ptr<IntentionQueue>> intention_queues_;
-
-  EntryCache cache_;
-
-  std::thread log_reader_;
-  std::thread intention_reader_;
+  std::thread io_thread_;
 };
 
 }
