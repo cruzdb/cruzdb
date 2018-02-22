@@ -9,3 +9,7 @@ target_link_libraries(cruzdb_thrash
   ${Boost_PROGRAM_OPTIONS_LIBRARY}
   ${Boost_SYSTEM_LIBRARY})
 install(TARGETS cruzdb_thrash DESTINATION bin)
+
+add_executable(zone_bench zone_bench.cc)
+set_target_properties(zone_bench
+  PROPERTIES COMPILE_FLAGS "-O3")
