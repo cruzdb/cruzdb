@@ -521,7 +521,7 @@ TEST(Txn, WriteWriteNoConflictSnapInit) {
 int main(int argc, char **argv)
 {
   logger = spdlog::stdout_color_mt("cruzdb");
-  rocksdb::port::InstallStackTraceHandler();
+  cruzdb::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

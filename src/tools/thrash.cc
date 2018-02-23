@@ -93,7 +93,7 @@ int main(int argc, char **argv)
   po::notify(vm);
 
   auto logger = spdlog::stdout_color_mt("cruzdb");
-  rocksdb::port::InstallStackTraceHandler();
+  cruzdb::InstallStackTraceHandler();
 
   zlog::Log *log;
   int ret = zlog::Log::Create("ram", "log", {}, "", "", &log);

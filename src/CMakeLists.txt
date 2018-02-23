@@ -22,6 +22,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src/spdlog/include)
 
 add_subdirectory(googletest/googlemock)
 add_subdirectory(include)
+add_subdirectory(port)
 add_subdirectory(db)
 add_subdirectory(tools)
 

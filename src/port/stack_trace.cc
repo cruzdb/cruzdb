@@ -1,137 +1,62 @@
-//  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under both the GPLv2 (found in the
-//  COPYING file in the root directory) and Apache 2.0 License
-//  (found in the LICENSE.Apache file in the root directory).
-//
+// from https://eli.thegreenplace.net/2015/programmatic-access-to-the-call-stack-in-c/
 #include "port/stack_trace.h"
-
-#if 0
-
-// noop
-
-namespace rocksdb {
-namespace port {
-void InstallStackTraceHandler() {}
-void PrintStack(int first_frames_to_skip) {}
-}  // namespace port
-}  // namespace rocksdb
-
-#else
-
-#include <execinfo.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#define UNW_LOCAL_ONLY
 #include <cxxabi.h>
+#include <libunwind.h>
+#include <cstdio>
+#include <cstdlib>
+#include <signal.h>
+#include <string.h>
 
-namespace rocksdb {
-namespace port {
+namespace cruzdb {
 
-namespace {
+static void backtrace() {
+  unw_cursor_t cursor;
+  unw_context_t context;
 
-#ifdef __linux__
-const char* GetExecutableName() {
-  static char name[1024];
+  // Initialize cursor to current frame for local unwinding.
+  unw_getcontext(&context);
+  unw_init_local(&cursor, &context);
 
-  char link[1024];
-  snprintf(link, sizeof(link), "/proc/%d/exe", getpid());
-  auto read = readlink(link, name, sizeof(name) - 1);
-  if (-1 == read) {
-    return nullptr;
-  } else {
-    name[read] = 0;
-    return name;
-  }
-}
+  // Unwind frames one by one, going up the frame stack.
+  while (unw_step(&cursor) > 0) {
+    unw_word_t offset, pc;
+    unw_get_reg(&cursor, UNW_REG_IP, &pc);
+    if (pc == 0) {
+      break;
+    }
+    std::printf("0x%lx:", pc);
 
-void PrintStackTraceLine(const char* symbol, void* frame) {
-  static const char* executable = GetExecutableName();
-  if (symbol) {
-    fprintf(stderr, "%s ", symbol);
-  }
-  if (executable) {
-    // out source to addr2line, for the address translation
-    const int kLineMax = 256;
-    char cmd[kLineMax];
-    snprintf(cmd, kLineMax, "addr2line %p -e %s -f -C 2>&1", frame, executable);
-    auto f = popen(cmd, "r");
-    if (f) {
-      char line[kLineMax];
-      while (fgets(line, sizeof(line), f)) {
-        line[strlen(line) - 1] = 0;  // remove newline
-        fprintf(stderr, "%s\t", line);
+    char sym[256];
+    if (unw_get_proc_name(&cursor, sym, sizeof(sym), &offset) == 0) {
+      char* nameptr = sym;
+      int status;
+      char* demangled = abi::__cxa_demangle(sym, nullptr, nullptr, &status);
+      if (status == 0) {
+        nameptr = demangled;
       }
-      pclose(f);
+      std::printf(" (%s+0x%lx)\n", nameptr, offset);
+      std::free(demangled);
+    } else {
+      std::printf(" -- error: unable to obtain symbol name for this frame\n");
     }
-  } else {
-    fprintf(stderr, " %p", frame);
   }
-
-  fprintf(stderr, "\n");
-}
-#elif defined(__APPLE__)
-
-void PrintStackTraceLine(const char* symbol, void* frame) {
-  static int pid = getpid();
-  // out source to atos, for the address translation
-  const int kLineMax = 256;
-  char cmd[kLineMax];
-  snprintf(cmd, kLineMax, "xcrun atos %p -p %d  2>&1", frame, pid);
-  auto f = popen(cmd, "r");
-  if (f) {
-    char line[kLineMax];
-    while (fgets(line, sizeof(line), f)) {
-      line[strlen(line) - 1] = 0;  // remove newline
-      fprintf(stderr, "%s\t", line);
-    }
-    pclose(f);
-  } else if (symbol) {
-    fprintf(stderr, "%s ", symbol);
-  }
-
-  fprintf(stderr, "\n");
-}
-
-#endif
-
-}  // namespace
-
-void PrintStack(int first_frames_to_skip) {
-  const int kMaxFrames = 100;
-  void* frames[kMaxFrames];
-
-  auto num_frames = backtrace(frames, kMaxFrames);
-  auto symbols = backtrace_symbols(frames, num_frames);
-
-  for (int i = first_frames_to_skip; i < num_frames; ++i) {
-    fprintf(stderr, "#%-2d  ", i - first_frames_to_skip);
-    PrintStackTraceLine((symbols != nullptr) ? symbols[i] : nullptr, frames[i]);
-  }
-  free(symbols);
 }
 
 static void StackTraceHandler(int sig) {
-  // reset to default handler
   signal(sig, SIG_DFL);
   fprintf(stderr, "Received signal %d (%s)\n", sig, strsignal(sig));
+  backtrace();
   // skip the top three signal handler related frames
-  PrintStack(3);
+  //PrintStack(3);
   // re-signal to default handler (so we still get core dump if needed...)
   raise(sig);
 }
 
 void InstallStackTraceHandler() {
-  // just use the plain old signal as it's simple and sufficient
-  // for this use case
   signal(SIGILL, StackTraceHandler);
   signal(SIGSEGV, StackTraceHandler);
   signal(SIGBUS, StackTraceHandler);
   signal(SIGABRT, StackTraceHandler);
 }
-
-}  // namespace port
-}  // namespace rocksdb
-
-#endif
+}

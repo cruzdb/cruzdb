@@ -55,7 +55,7 @@ int main(int argc, char **argv)
     stop_after = atoi(argv[2]);
   }
 
-  rocksdb::port::InstallStackTraceHandler();
+  cruzdb::InstallStackTraceHandler();
 
   zlog::Log *log;
   int ret = zlog::Log::Create("lmdb", "log", {{"path", db_path}}, "", "", &log);
