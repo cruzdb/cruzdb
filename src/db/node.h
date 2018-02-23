@@ -81,13 +81,6 @@ class NodePtr {
   // do we need any sort of locking on other?
   NodePtr(NodePtr&& other) = default;
 
-  void replace(const NodePtr& other) {
-    std::lock_guard<std::mutex>(other.lock_);
-    ref_ = other.ref_;
-    db_ = other.db_;
-    address_ = other.address_;
-  }
-
   // TODO: tracing
   inline SharedNodeRef ref(std::vector<NodeAddress>& trace) {
     std::unique_lock<std::mutex> lk(lock_);

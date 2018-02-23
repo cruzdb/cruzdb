@@ -24,7 +24,7 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
   entry_service_->Start(point.replay_start_pos);
 
   auto root = cache_.CacheAfterImage(*point.after_image, point.after_image_pos);
-  root_.replace(root);
+  root_ = root;
 
   root_snapshot_ = point.after_image->intention();
   last_intention_processed_ = root_snapshot_;
@@ -451,7 +451,7 @@ void DBImpl::TransactionProcessorEntry()
 
     std::unique_lock<std::mutex> lk(lock_);
 
-    root_.replace(root);
+    root_ = root;
     root_snapshot_ = intention_pos;
 
     assert(last_intention_processed_ < intention_pos);
