@@ -66,6 +66,8 @@ class PersistentTree {
   PersistentTree& operator=(const PersistentTree&& other) = delete;
 
  public:
+  void Put(const zlog::Slice& prefixed_key, const zlog::Slice& value);
+
   void Put(const std::string& prefix, const zlog::Slice& key,
       const zlog::Slice& value) {
     Put(prefix_string(prefix, key.ToString()), value);
@@ -146,7 +148,6 @@ class PersistentTree {
     return out;
   }
 
-  void Put(const zlog::Slice& key, const zlog::Slice& value);
   void Delete(const zlog::Slice& key);
   int Get(const zlog::Slice& key, std::string *value);
 

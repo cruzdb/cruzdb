@@ -1,5 +1,14 @@
 #include "db_impl.h"
 
+static std::string prefix_string(const std::string& prefix,
+    const std::string& value)
+{
+  auto out = prefix;
+  out.push_back(0);
+  out.append(value);
+  return out;
+}
+
 namespace cruzdb {
 
   // root intention unsigned?
@@ -31,12 +40,7 @@ int TransactionImpl::Get(const zlog::Slice& key, std::string *value)
 
 void TransactionImpl::Put(const zlog::Slice& key, const zlog::Slice& value)
 {
-  assert(tree_);
-  assert(intention_);
-  assert(!committed_);
-
-  intention_->Put(key, value);
-  tree_->Put(PREFIX_USER, key, value);
+  return Put(PREFIX_USER, key, value);
 }
 
 void TransactionImpl::Delete(const zlog::Slice& key)
@@ -60,6 +64,19 @@ bool TransactionImpl::Commit()
   }
 
   return db_->CompleteTransaction(this);
+}
+
+void TransactionImpl::Put(const std::string& prefix, const zlog::Slice& key,
+    const zlog::Slice& value)
+{
+  assert(tree_);
+  assert(intention_);
+  assert(!committed_);
+
+  auto prefixed_key = prefix_string(prefix, key.ToString());
+
+  intention_->Put(prefixed_key, value);
+  tree_->Put(prefixed_key, value);
 }
 
 }

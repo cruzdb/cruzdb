@@ -174,6 +174,8 @@ class EntryService {
 
   uint64_t CheckTail(bool update_max_pos = false);
 
+  void Fill(uint64_t pos) const;
+
  private:
   void IOEntry();
   uint64_t Append(const std::string& data) const;

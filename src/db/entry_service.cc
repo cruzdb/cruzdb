@@ -377,6 +377,24 @@ uint64_t EntryService::CheckTail(bool update_max_pos)
   return pos;
 }
 
+void EntryService::Fill(uint64_t pos) const
+{
+  int delay = 1;
+  while (true) {
+    int ret = log_->Fill(pos);
+    if (ret == 0)
+      return;
+    if (ret == -EROFS) {
+      std::cerr << "filling read-only pos" << std::endl;
+      assert(0);
+      exit(1);
+    }
+    std::cerr << "failed to fill ret " << ret << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    delay = std::min(delay*10, 1000);
+  }
+}
+
 uint64_t EntryService::Append(const std::string& data) const
 {
   int delay = 1;

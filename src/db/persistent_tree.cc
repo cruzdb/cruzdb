@@ -531,7 +531,8 @@ void PersistentTree::balance_delete(SharedNodeRef extra_black,
     new_node->set_red(false);
 }
 
-void PersistentTree::Put(const zlog::Slice& key, const zlog::Slice& value)
+void PersistentTree::Put(const zlog::Slice& prefixed_key,
+    const zlog::Slice& value)
 {
   TraceApplier ta(this);
 
@@ -542,7 +543,7 @@ void PersistentTree::Put(const zlog::Slice& key, const zlog::Slice& value)
 
   //src_root_.Print();
   auto base_root = root_ == nullptr ? src_root_.ref(trace_) : root_;
-  auto root = insert_recursive(path, key, value, base_root);
+  auto root = insert_recursive(path, prefixed_key, value, base_root);
   if (root == nullptr) {
     /*
      * this is the update case that is transformed into delete + put. an
@@ -550,10 +551,10 @@ void PersistentTree::Put(const zlog::Slice& key, const zlog::Slice& value)
      * step in delete or 2) update the algorithm to handle this case
      * explicitly.
      */
-    Delete(key); // first remove the key
+    Delete(prefixed_key); // first remove the key
     path.clear(); // new path will be built
     assert(root_ != nullptr); // delete set the root
-    root = insert_recursive(path, key, value, root_);
+    root = insert_recursive(path, prefixed_key, value, root_);
     assert(root != nullptr); // a new root was added
   }
 

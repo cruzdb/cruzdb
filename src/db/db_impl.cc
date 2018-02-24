@@ -343,7 +343,7 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
 
       case cruzdb_proto::TransactionOp::PUT:
         assert(op.has_val());
-        tree->Put(PREFIX_USER, op.key(), op.val());
+        tree->Put(op.key(), op.val());
         break;
 
       case cruzdb_proto::TransactionOp::DELETE:

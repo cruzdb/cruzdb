@@ -15,12 +15,17 @@ class TransactionImpl : public Transaction {
 
   ~TransactionImpl();
 
+  // exported transaction api
  public:
   virtual int Get(const zlog::Slice& key, std::string *value) override;
   virtual void Put(const zlog::Slice& key, const zlog::Slice& value) override;
   virtual void Delete(const zlog::Slice& key) override;
-
   virtual bool Commit() override;
+
+  // internal api
+ public:
+  void Put(const std::string& prefix, const zlog::Slice& key,
+      const zlog::Slice& value);
 
  public:
   uint64_t Token() const {
