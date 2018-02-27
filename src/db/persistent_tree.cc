@@ -531,6 +531,64 @@ void PersistentTree::balance_delete(SharedNodeRef extra_black,
     new_node->set_red(false);
 }
 
+SharedNodeRef PersistentTree::copy_recursive(const zlog::Slice& key,
+    const SharedNodeRef& node)
+{
+  assert(node != nullptr);
+
+  // not found
+  if (node == Node::Nil())
+    return nullptr;
+
+  int cmp = key.compare(zlog::Slice(node->key().data(),
+        node->key().size()));
+  bool less = cmp < 0;
+  bool equal = cmp == 0;
+
+  if (equal) {
+    // was already copied?
+    if (node->rid() == rid_) {
+      return nullptr;
+    }
+    auto copy = Node::Copy(node, db_, rid_);
+    fresh_nodes_.push_back(copy);
+    return copy;
+  }
+
+  auto child = copy_recursive(key,
+      (less ? node->left.ref(trace_) : node->right.ref(trace_)));
+
+  if (child == nullptr)
+    return child;
+
+  SharedNodeRef copy;
+  if (node->rid() == rid_)
+    copy = node;
+  else {
+    copy = Node::Copy(node, db_, rid_);
+    fresh_nodes_.push_back(copy);
+  }
+
+  if (less)
+    copy->left.set_ref(child);
+  else
+    copy->right.set_ref(child);
+
+  return copy;
+}
+
+void PersistentTree::Copy(const zlog::Slice& prefixed_key)
+{
+  TraceApplier ta(this);
+
+  auto base_root = root_ == nullptr ? src_root_.ref(trace_) : root_;
+  auto root = copy_recursive(prefixed_key, base_root);
+  if (root) {
+    // an existing path is replaced, so no rebalance necessary.
+    root_ = root;
+  }
+}
+
 void PersistentTree::Put(const zlog::Slice& prefixed_key,
     const zlog::Slice& value)
 {

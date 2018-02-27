@@ -351,6 +351,11 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
         tree->Delete(PREFIX_USER, op.key());
         break;
 
+      case cruzdb_proto::TransactionOp::COPY:
+        assert(!op.has_val());
+        tree->Copy(op.key());
+        break;
+
       default:
         assert(0);
         exit(1);
@@ -372,9 +377,13 @@ void DBImpl::TransactionProcessorEntry()
     if (logger_)
       logger_->info("txn-proc: ipos {}", intention_pos);
 
-    // serial intention?
+    // serial intention? a flush intention is also treated like serial in that
+    // it has no conflicts. be careful that serial doesn't examine anything in
+    // the flush intention that might not be set given the flush intention's
+    // special cases.
     assert(root_snapshot_ < intention_pos);
-    const auto serial = root_snapshot_ == intention->Snapshot();
+    const auto serial = root_snapshot_ == intention->Snapshot() ||
+      intention->Flush();
 
     // check for conflicts
     bool abort;
@@ -550,6 +559,64 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   bool committed = txn_finder_.WaitOnTransaction(waiter, pos);
 
   return committed;
+}
+
+// 1. when we do gc, we should also probably be removing entries from the
+// committed intention index
+//
+// 2. it might be smart to use metadata to avoid copying nodes that were already
+// moved forward through some other process after they were identified for gc.
+//
+// 3. the order of gc might actually matter depending on if we end up creating
+// node copies where the children are further back in the log...
+void DBImpl::gc()
+{
+  auto node = root_.ref_notrace();
+
+  std::map<NodeAddress, std::string> addrs;
+  std::stack<SharedNodeRef> stack;
+  while (!stack.empty() || node != Node::Nil()) {
+    if (node != Node::Nil()) {
+      stack.push(node);
+      node = node->left.ref_notrace();
+    } else {
+      node = stack.top();
+      stack.pop();
+
+      auto left_node = node->left.ref_notrace();
+      if (left_node != Node::Nil()) {
+        auto addr = node->left.Address();
+        assert(addr);
+        addrs.emplace(*addr, left_node->key().ToString());
+        if (addrs.size() > 5) {
+          addrs.erase(--addrs.end());
+        }
+      }
+
+      auto right_node = node->right.ref_notrace();
+      if (right_node != Node::Nil()) {
+        auto addr = node->right.Address();
+        assert(addr);
+        addrs.emplace(*addr, right_node->key().ToString());
+        if (addrs.size() > 5) {
+          addrs.erase(--addrs.end());
+        }
+      }
+
+      node = node->right.ref_notrace();
+    }
+  }
+
+  auto flush = std::unique_ptr<Intention>(
+      new Intention(0, 0));
+
+  for (auto& addr : addrs) {
+    std::cout << addr.first << "/" << addr.second << " ";
+    flush->Copy(addr.second);
+  }
+  std::cout << std::endl;
+
+  entry_service_->Append(std::move(flush));
 }
 
 void DBImpl::TransactionFinder::AddTokenWaiter(

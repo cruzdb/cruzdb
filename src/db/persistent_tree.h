@@ -82,6 +82,8 @@ class PersistentTree {
     return Get(prefix_string(prefix, key.ToString()), value);
   }
 
+  void Copy(const zlog::Slice& prefixed_key);
+
   bool ReadOnly() const {
     return root_ == nullptr;
   }
@@ -160,8 +162,12 @@ class PersistentTree {
     return front;
   }
 
+  SharedNodeRef copy_recursive(const zlog::Slice& key,
+      const SharedNodeRef& node);
+
   SharedNodeRef insert_recursive(std::deque<SharedNodeRef>& path,
-      const zlog::Slice& key, const zlog::Slice& value, const SharedNodeRef& node);
+      const zlog::Slice& key, const zlog::Slice& value,
+      const SharedNodeRef& node);
 
   template<typename ChildA, typename ChildB>
   void insert_balance(SharedNodeRef& parent, SharedNodeRef& nn,

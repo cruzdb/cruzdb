@@ -65,7 +65,6 @@ class DBImpl : public DB {
   Iterator *NewIterator(Snapshot *snapshot) override;
   int Get(const zlog::Slice& key, std::string *value) override;
 
-
   // verify that the root tree is a red-black tree
  public:
   void Validate();
@@ -79,6 +78,9 @@ class DBImpl : public DB {
   boost::optional<uint64_t> IntentionToAfterImage(uint64_t intention_pos);
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
       boost::optional<NodeAddress>& address);
+
+ public:
+  void gc();
 
   // transaction processing
  public:

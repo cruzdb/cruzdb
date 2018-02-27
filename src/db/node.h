@@ -31,15 +31,15 @@ class NodeAddress {
     position_(position), offset_(offset), is_afterimage_(is_afterimage)
   {}
 
-  uint64_t Position() const {
+  inline uint64_t Position() const {
     return position_;
   }
 
-  uint16_t Offset() const {
+  inline uint16_t Offset() const {
     return offset_;
   }
 
-  bool IsAfterImage() const {
+  inline bool IsAfterImage() const {
     return is_afterimage_;
   }
 
@@ -48,6 +48,32 @@ class NodeAddress {
   uint16_t offset_;
   bool is_afterimage_;
 };
+
+inline bool operator<(const NodeAddress& a, const NodeAddress& b) {
+  if (a.Position() < b.Position()) {
+    return true;
+  } else if (a.Position() > b.Position()) {
+    return false;
+  } else if (a.Offset() < b.Offset()) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+inline std::ostream& operator<<(std::ostream& out, const NodeAddress& addr) {
+  return out << addr.Position() << ":" << addr.Offset()
+    << ":" << (addr.IsAfterImage() ? "a" : "i");
+}
+
+inline std::ostream& operator<<(std::ostream& out,
+    const boost::optional<NodeAddress>& addr) {
+  if (addr) {
+    return out << *addr;
+  }
+  return out << "undef";
+}
+
 
 /*
  * TODO: add locking to various constructors
