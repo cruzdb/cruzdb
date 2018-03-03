@@ -11,12 +11,14 @@ DB::~DB()
 {
 }
 
-int DB::Open(zlog::Log *log, bool create_if_empty, DB **db)
+int DB::Open(const Options& options, zlog::Log *log,
+    bool create_if_empty, DB **db)
 {
-  return Open(log, create_if_empty, db, nullptr);
+  return Open(options, log, create_if_empty, db, nullptr);
 }
 
-int DB::Open(zlog::Log *log, bool create_if_empty, DB **db,
+int DB::Open(const Options& options, zlog::Log *log,
+    bool create_if_empty, DB **db,
     std::shared_ptr<spdlog::logger> logger)
 {
   auto entry_service = std::unique_ptr<EntryService>(new EntryService(log));
