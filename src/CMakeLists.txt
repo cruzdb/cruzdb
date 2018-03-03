@@ -26,6 +26,36 @@ add_subdirectory(port)
 add_subdirectory(db)
 add_subdirectory(tools)
 
+add_library(cruzdb SHARED
+  db/db_impl.cc
+  db/transaction_impl.cc
+  db/node_cache.cc
+  db/iterator_impl.cc
+  db/node.cc
+  db/persistent_tree.cc
+  db/db.cc
+  db/entry_service.cc
+  $<TARGET_OBJECTS:cruzdb_pb>
+  port/port_posix.cc
+  util/random.cc
+  util/thread_local.cc
+  monitoring/statistics.cc
+  monitoring/histogram.cc
+  civetweb/src/civetweb.c
+  civetweb/src/CivetServer.cpp)
+target_include_directories(cruzdb
+  PUBLIC ${PROTOBUF_INCLUDE_DIR}
+  PUBLIC ${ZLOG_INCLUDE_DIRS}
+  PUBLIC "${PROJECT_SOURCE_DIR}/src/civetweb/include")
+target_link_libraries(cruzdb
+  ${ZLOG_LIBRARIES}
+  ${PROTOBUF_LIBRARIES})
+set_target_properties(cruzdb PROPERTIES
+  OUTPUT_NAME cruzdb
+  VERSION 1.0.0
+  SOVERSION 1)
+install(TARGETS cruzdb LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
 option(WITH_JNI "build with JNI" OFF)
 if(WITH_JNI)
   message(STATUS "JNI library is enabled")

@@ -1,30 +1,9 @@
-PROTOBUF_GENERATE_CPP(DB_PROTO_SRCS DB_PROTO_HDRS cruzdb.proto)
-
 include_directories(${ZLOG_INCLUDE_DIRS})
 
-add_library(cruzdb SHARED
-  db_impl.cc
-  transaction_impl.cc
-  node_cache.cc
-  iterator_impl.cc
-  node.cc
-  persistent_tree.cc
-  db.cc
-  entry_service.cc
-  ${DB_PROTO_SRCS}
-  ../civetweb/src/civetweb.c
-  ../civetweb/src/CivetServer.cpp)
-target_include_directories(cruzdb
-  PUBLIC ${PROTOBUF_INCLUDE_DIR}
-  PUBLIC "${CMAKE_SOURCE_DIR}/src/civetweb/include")
-target_link_libraries(cruzdb
-  ${ZLOG_LIBRARIES}
-  ${PROTOBUF_LIBRARIES})
-set_target_properties(cruzdb PROPERTIES
-  OUTPUT_NAME cruzdb
-  VERSION 1.0.0
-  SOVERSION 1)
-install(TARGETS cruzdb LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+PROTOBUF_GENERATE_CPP(DB_PROTO_SRCS DB_PROTO_HDRS cruzdb.proto)
+add_library(cruzdb_pb OBJECT ${DB_PROTO_SRCS})
+set_property(TARGET cruzdb_pb
+  PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 add_executable(thrash thrash.cc)
 target_link_libraries(thrash cruzdb)
