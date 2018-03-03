@@ -10,7 +10,6 @@ namespace cruzdb {
 DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
     std::unique_ptr<EntryService> entry_service,
     std::shared_ptr<spdlog::logger> logger) :
-  log_(log),
   cache_(log, this),
   stop_(false),
   entry_service_(std::move(entry_service)),

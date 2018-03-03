@@ -9,6 +9,7 @@
 #include "port/stack_trace.h"
 #include "cruzdb/db.h"
 #include "db/db_impl.h"
+#include "include/cruzdb/statistics.h"
 
 namespace po = boost::program_options;
 
@@ -103,8 +104,11 @@ int main(int argc, char **argv)
   int ret = zlog::Log::Create("ram", "log", {}, "", "", &log);
   assert(ret == 0);
 
+  auto stats = cruzdb::CreateDBStatistics();
+
   cruzdb::DB *db;
   cruzdb::Options options;
+  options.statistics = stats;
   ret = cruzdb::DB::Open(options, log, true, &db);
   assert(ret == 0);
 
@@ -126,6 +130,8 @@ int main(int argc, char **argv)
 
   auto db_map = get_map(db, db->GetSnapshot());
   assert(db_map == cc_map);
+
+  std::cout << "STATISTICS:" << std::endl << stats->ToString();
 
   delete db;
   delete log;

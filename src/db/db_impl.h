@@ -185,7 +185,6 @@ class DBImpl : public DB {
   }
 
   mutable std::mutex lock_;
-  zlog::Log *log_;
   NodeCache cache_;
   bool stop_;
 

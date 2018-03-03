@@ -1,20 +1,21 @@
 #pragma once
 #include <condition_variable>
+#include <functional>
 #include <list>
 #include <mutex>
-#include <functional>
 #include <queue>
 #include <thread>
 #include <boost/optional.hpp>
-#include "db/persistent_tree.h"
 #include <zlog/log.h>
+#include "db/persistent_tree.h"
 #include "db/intention.h"
+#include "monitoring/statistics.h"
 
 namespace cruzdb {
 
 class EntryService {
  public:
-  explicit EntryService(zlog::Log *log);
+  EntryService(Statistics *statistics, zlog::Log *log);
 
   void Start(uint64_t pos);
   void Stop();
@@ -177,6 +178,8 @@ class EntryService {
   void Fill(uint64_t pos) const;
 
  private:
+  Statistics *stats_;
+
   void IOEntry();
   uint64_t Append(const std::string& data) const;
 

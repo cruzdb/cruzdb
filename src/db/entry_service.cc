@@ -4,7 +4,8 @@
 
 namespace cruzdb {
 
-EntryService::EntryService(zlog::Log *log) :
+EntryService::EntryService(Statistics *statistics, zlog::Log *log) :
+  stats_(statistics),
   log_(log),
   stop_(false),
   max_pos_(0)
@@ -75,6 +76,9 @@ void EntryService::IOEntry()
           }
           assert(0);
         }
+
+        RecordTick(stats_, LOG_READS);
+        RecordTick(stats_, BYTES_READ, data.size());
 
         cruzdb_proto::LogEntry entry;
         assert(entry.ParseFromString(data));
@@ -205,11 +209,13 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool 
       if (ret == -ENODATA) {
         CacheEntry cache_entry;
         cache_entry.type = CacheEntry::EntryType::FILLED;
+        RecordTick(stats_, LOG_READS_FILLED);
         lk.lock();
         auto p = entry_cache_.emplace(pos, cache_entry);
         entry_cache_gc();
         return p.first->second;
       } else if (ret == -ENOENT) {
+        RecordTick(stats_, LOG_READS_UNWRITTEN);
         if (fill) {
           ret = log_->Fill(pos);
           assert(ret == 0 || ret == -EROFS);
@@ -220,8 +226,11 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool 
       assert(0);
       exit(1);
     }
+    RecordTick(stats_, LOG_READS);
     break;
   }
+
+  RecordTick(stats_, BYTES_READ, data.size());
 
   cruzdb_proto::LogEntry entry;
   assert(entry.ParseFromString(data));
@@ -402,6 +411,8 @@ uint64_t EntryService::Append(const std::string& data) const
     uint64_t pos;
     int ret = log_->Append(data, &pos);
     if (ret == 0) {
+      RecordTick(stats_, LOG_APPENDS);
+      RecordTick(stats_, BYTES_WRITTEN, data.size());
       return pos;
     }
     std::cerr << "failed to append ret " << ret << std::endl;
@@ -481,6 +492,7 @@ EntryService::ReadAfterImage(const uint64_t pos)
     int ret = log_->Read(pos, &data);
     if (ret) {
       if (ret == -ENODATA) {
+        RecordTick(stats_, LOG_READS_FILLED);
         // a filled entry will never be an afterimage
         std::cerr << "unexpected log entry" << std::endl;
         assert(0);
@@ -492,6 +504,9 @@ EntryService::ReadAfterImage(const uint64_t pos)
       delay = std::min(delay*10, 1000);
       continue;
     }
+
+    RecordTick(stats_, LOG_READS);
+    RecordTick(stats_, BYTES_READ, data.size());
 
     cruzdb_proto::LogEntry entry;
     assert(entry.ParseFromString(data));
@@ -564,6 +579,8 @@ EntryService::ReadIntentions(const std::vector<uint64_t>& positions)
         int ioret = c->ReturnValue();
         if (ioret == 0) {
           ios[i] = nullptr;
+          RecordTick(stats_, LOG_READS);
+          RecordTick(stats_, BYTES_READ, blobs[i].size());
         } else if (ioret == -ENODATA) {
           std::cerr << "unexpected log entry" << std::endl;
           assert(0);

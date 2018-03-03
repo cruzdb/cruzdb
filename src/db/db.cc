@@ -21,7 +21,8 @@ int DB::Open(const Options& options, zlog::Log *log,
     bool create_if_empty, DB **db,
     std::shared_ptr<spdlog::logger> logger)
 {
-  auto entry_service = std::unique_ptr<EntryService>(new EntryService(log));
+  auto entry_service = std::unique_ptr<EntryService>(
+      new EntryService(options.statistics.get(), log));
 
   uint64_t tail = entry_service->CheckTail();
   if (tail == 0) {
