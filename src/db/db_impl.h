@@ -278,7 +278,9 @@ class DBImpl : public DB {
   std::condition_variable janitor_cond_;
   std::thread janitor_thread_;
 
+#if 0
   CivetServer metrics_http_server_;
+#endif
   MetricsHandler metrics_handler_;
   struct DBStats db_stats_;
 

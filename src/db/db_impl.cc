@@ -16,7 +16,9 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
   intention_iterator_(entry_service_->NewIntentionIterator(point.replay_start_pos)),
   in_flight_txn_rid_(-1),
   root_(Node::Nil(), this),
+#if 0
   metrics_http_server_({"listening_ports", "0.0.0.0:8080", "num_threads", "1"}),
+#endif
   metrics_handler_(this),
   logger_(logger)
 {
@@ -37,7 +39,9 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
 
   janitor_thread_ = std::thread(&DBImpl::JanitorEntry, this);
 
+#if 0
   metrics_http_server_.addHandler("/metrics", &metrics_handler_);
+#endif
 }
 
 DBImpl::~DBImpl()
@@ -59,9 +63,10 @@ DBImpl::~DBImpl()
   afterimage_finalizer_thread_.join();
 
   cache_.Stop();
-
+#if 0
   metrics_http_server_.removeHandler("/metrics");
   metrics_http_server_.close();
+#endif
 }
 
 Snapshot *DBImpl::GetSnapshot()
