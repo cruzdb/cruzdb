@@ -7,6 +7,7 @@
 #include <list>
 #include <condition_variable>
 #include <zlog/log.h>
+#include "cruzdb/options.h"
 #include "node.h"
 #include "db/cruzdb.pb.h"
 #include "db/lru_cache.hpp"
@@ -36,13 +37,14 @@ struct pair_hash {
 
 class NodeCache {
  public:
-  NodeCache(zlog::Log *log, DBImpl *db) :
+  NodeCache(const Options& options, zlog::Log *log, DBImpl *db) :
     log_(log),
     db_(db),
     used_bytes_(0),
     stop_(false),
     num_slots_(8),
-    imap_(100000)
+    cache_size_(options.node_cache_size),
+    imap_(options.imap_cache_size)
   {
     for (size_t i = 0; i < num_slots_; i++) {
       shards_.push_back(std::unique_ptr<shard>(new shard));
@@ -86,6 +88,27 @@ class NodeCache {
     }
   }
 
+  // drop everything in the cache
+  void Clear() {
+    {
+      std::lock_guard<std::mutex> l(lock_);
+      imap_.clear();
+    }
+    for (size_t slot = 0; slot < num_slots_; slot++) {
+      auto& shard = shards_[slot];
+      auto& nodes_ = shard->nodes;
+      auto& nodes_lru_ = shard->lru;
+      std::unique_lock<std::mutex> lk(shard->lock);
+      while (!nodes_.empty()) {
+        auto key = nodes_lru_.back();
+        auto nit = nodes_.find(key);
+        assert(nit != nodes_.end());
+        nodes_.erase(nit);
+        nodes_lru_.pop_back();
+      }
+    }
+  }
+
  private:
   zlog::Log *log_;
   DBImpl *db_;
@@ -93,6 +116,7 @@ class NodeCache {
   std::atomic_size_t used_bytes_;
   bool stop_;
   const size_t num_slots_;
+  const size_t cache_size_;
 
   struct entry {
     SharedNodeRef node;

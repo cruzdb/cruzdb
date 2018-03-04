@@ -7,10 +7,11 @@
 
 namespace cruzdb {
 
-DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
+DBImpl::DBImpl(const Options& options, zlog::Log *log,
+    const RestorePoint& point,
     std::unique_ptr<EntryService> entry_service,
     std::shared_ptr<spdlog::logger> logger) :
-  cache_(log, this),
+  cache_(options, log, this),
   stop_(false),
   entry_service_(std::move(entry_service)),
   intention_iterator_(entry_service_->NewIntentionIterator(point.replay_start_pos)),
@@ -20,7 +21,8 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
   metrics_http_server_({"listening_ports", "0.0.0.0:8080", "num_threads", "1"}),
 #endif
   metrics_handler_(this),
-  logger_(logger)
+  logger_(logger),
+  options_(options)
 {
   entry_service_->Start(point.replay_start_pos);
 

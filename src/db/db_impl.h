@@ -49,7 +49,8 @@ class DBImpl : public DB {
   static int FindRestorePoint(EntryService *entry_service, RestorePoint& point,
       uint64_t& latest_intention);
 
-  DBImpl(zlog::Log *log, const RestorePoint& point,
+  DBImpl(const Options& options, zlog::Log *log,
+      const RestorePoint& point,
       std::unique_ptr<EntryService> entry_service,
       std::shared_ptr<spdlog::logger> logger);
 
@@ -64,6 +65,11 @@ class DBImpl : public DB {
   void ReleaseSnapshot(Snapshot *snapshot) override;
   Iterator *NewIterator(Snapshot *snapshot) override;
   int Get(const zlog::Slice& key, std::string *value) override;
+
+  void ClearCaches() {
+    cache_.Clear();
+    entry_service_->ClearCaches();
+  }
 
   // verify that the root tree is a red-black tree
  public:
@@ -285,6 +291,7 @@ class DBImpl : public DB {
   struct DBStats db_stats_;
 
   std::shared_ptr<spdlog::logger> logger_;
+  Options options_;
 };
 
 }

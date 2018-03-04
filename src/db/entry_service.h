@@ -7,6 +7,7 @@
 #include <thread>
 #include <boost/optional.hpp>
 #include <zlog/log.h>
+#include "cruzdb/options.h"
 #include "db/persistent_tree.h"
 #include "db/intention.h"
 #include "monitoring/statistics.h"
@@ -15,7 +16,7 @@ namespace cruzdb {
 
 class EntryService {
  public:
-  EntryService(Statistics *statistics, zlog::Log *log);
+  EntryService(const Options& options, Statistics *statistics, zlog::Log *log);
 
   void Start(uint64_t pos);
   void Stop();
@@ -177,6 +178,11 @@ class EntryService {
 
   void Fill(uint64_t pos) const;
 
+  void ClearCaches() {
+    std::unique_lock<std::mutex> lk(lock_);
+    entry_cache_.clear();
+  }
+
  private:
   Statistics *stats_;
 
@@ -198,6 +204,7 @@ class EntryService {
   std::list<std::condition_variable*> tail_waiters_;
 
   std::thread io_thread_;
+  const size_t cache_size_;
 };
 
 }

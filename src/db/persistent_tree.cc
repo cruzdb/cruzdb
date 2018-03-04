@@ -589,6 +589,10 @@ void PersistentTree::Copy(const zlog::Slice& prefixed_key)
   }
 }
 
+// TODO
+//  - the Copy interface above is a fine basis for implementing a more efficient
+//  update mechanism. Below it's handled inefficiently by deleting and
+//  re-inserting. Boo.
 void PersistentTree::Put(const zlog::Slice& prefixed_key,
     const zlog::Slice& value)
 {

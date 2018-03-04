@@ -22,7 +22,7 @@ int DB::Open(const Options& options, zlog::Log *log,
     std::shared_ptr<spdlog::logger> logger)
 {
   auto entry_service = std::unique_ptr<EntryService>(
-      new EntryService(options.statistics.get(), log));
+      new EntryService(options, options.statistics.get(), log));
 
   uint64_t tail = entry_service->CheckTail();
   if (tail == 0) {
@@ -61,7 +61,7 @@ int DB::Open(const Options& options, zlog::Log *log,
       point, latest_intention);
   assert(ret == 0);
 
-  DBImpl *impl = new DBImpl(log, point,
+  DBImpl *impl = new DBImpl(options, log, point,
       std::move(entry_service), logger);
 
   // if there is stuff to roll forward

@@ -6,20 +6,13 @@
 
 namespace cruzdb {
 
-// TODO: cache should enforce properties like all nodes have physical
-// addresses...
-
-// TODO: if usage goes above high marker block new txns
-static const size_t low_marker  =  512*1024*1024;
-//static const size_t high_marker = 8*1024*1024;
-
 void NodeCache::do_vaccum_()
 {
   while (true) {
     std::unique_lock<std::mutex> l(lock_);
 
     cond_.wait(l, [this]{
-        return !traces_.empty() || UsedBytes() > low_marker || stop_;
+        return !traces_.empty() || UsedBytes() > cache_size_ || stop_;
     });
 
     if (stop_)
@@ -58,8 +51,8 @@ void NodeCache::do_vaccum_()
       }
     }
 
-    if (UsedBytes() > low_marker) {
-      ssize_t target_bytes = (UsedBytes() - low_marker) / num_slots_;
+    if (UsedBytes() > cache_size_) {
+      ssize_t target_bytes = (UsedBytes() - cache_size_) / num_slots_;
       for (size_t slot = 0; slot < num_slots_; slot++) {
         auto& shard = shards_[slot];
         auto& nodes_ = shard->nodes;

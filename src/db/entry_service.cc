@@ -4,11 +4,13 @@
 
 namespace cruzdb {
 
-EntryService::EntryService(Statistics *statistics, zlog::Log *log) :
+EntryService::EntryService(const Options& options,
+    Statistics *statistics, zlog::Log *log) :
   stats_(statistics),
   log_(log),
   stop_(false),
-  max_pos_(0)
+  max_pos_(0),
+  cache_size_(options.entry_cache_size)
 {
 }
 
@@ -39,7 +41,7 @@ void EntryService::Stop()
 
 void EntryService::entry_cache_gc()
 {
-  while (entry_cache_.size() > 1000) {
+  while (entry_cache_.size() > cache_size_) {
     entry_cache_.erase(entry_cache_.begin());
   }
 }
