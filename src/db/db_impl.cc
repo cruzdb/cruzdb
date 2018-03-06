@@ -22,7 +22,8 @@ DBImpl::DBImpl(const Options& options, zlog::Log *log,
 #endif
   metrics_handler_(this),
   logger_(logger),
-  options_(options)
+  options_(options),
+  stats_(options.statistics.get())
 {
   entry_service_->Start(point.replay_start_pos);
 

@@ -44,6 +44,7 @@ class NodeCache {
     stop_(false),
     num_slots_(8),
     cache_size_(options.node_cache_size),
+    stats_(options.statistics.get()),
     imap_(options.imap_cache_size)
   {
     for (size_t i = 0; i < num_slots_; i++) {
@@ -117,6 +118,7 @@ class NodeCache {
   bool stop_;
   const size_t num_slots_;
   const size_t cache_size_;
+  Statistics *stats_;
 
   struct entry {
     SharedNodeRef node;

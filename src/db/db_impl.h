@@ -292,6 +292,7 @@ class DBImpl : public DB {
 
   std::shared_ptr<spdlog::logger> logger_;
   Options options_;
+  Statistics *stats_;
 };
 
 }

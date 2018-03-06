@@ -10,3 +10,11 @@ target_link_libraries(cruzdb_thrash
   ${Boost_PROGRAM_OPTIONS_LIBRARY}
   ${Boost_SYSTEM_LIBRARY})
 install(TARGETS cruzdb_thrash DESTINATION bin)
+
+add_executable(cruzdb_all_points all-points.cc)
+target_link_libraries(cruzdb_all_points
+  cruzdb
+  stack_trace
+  ${Boost_PROGRAM_OPTIONS_LIBRARY}
+  ${Boost_SYSTEM_LIBRARY})
+install(TARGETS cruzdb_all_points DESTINATION bin)
