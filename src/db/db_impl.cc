@@ -108,7 +108,7 @@ int DBImpl::FindRestorePoint(EntryService *entry_service, RestorePoint& point,
 
   bool set_latest_intention = false;
 
-  auto it = entry_service->NewReverseIterator(tail);
+  auto it = entry_service->NewReverseIterator(tail, "find_restore_point");
   while (true) {
     auto entry = it.NextEntry(true);
     // if hole, skip. see github issue #33

@@ -96,66 +96,55 @@ class EntryService {
     std::shared_ptr<cruzdb_proto::AfterImage> after_image;
   };
 
-  template<bool Forward>
   class Iterator {
    public:
-    Iterator(EntryService *entry_service, uint64_t pos) :
-      pos_(pos),
-      stop_(false),
-      entry_service_(entry_service)
-    {}
+    Iterator(EntryService *entry_service, uint64_t pos,
+        const std::string& name);
 
-    virtual boost::optional<
-      std::pair<uint64_t, EntryService::CacheEntry>> NextEntry(bool fill = false)
-    {
-      const auto pos = advance();
-      auto entry = entry_service_->Read(pos, fill);
-      if (entry) {
-        return std::make_pair(pos, *entry);
-      }
-      return boost::none;
-    }
+    virtual ~Iterator() {}
+
+    virtual uint64_t advance() = 0;
+
+    boost::optional<
+      std::pair<uint64_t, EntryService::CacheEntry>>
+      NextEntry(bool fill = false);
+
+   protected:
+    uint64_t pos_;
 
    private:
-    template<bool F = Forward, typename std::enable_if<F>::type* = nullptr>
-    inline uint64_t advance() {
-      return pos_++;
-    }
-
-    template<bool F = Forward, typename std::enable_if<!F>::type* = nullptr>
-    inline uint64_t advance() {
-      // the way this is setup is that we prep for the next read. so if we read
-      // pos 0, then pos goes to 2**64 with wrap around. need assertions in here
-      // etc...
-      return pos_--;
-    }
-
-    uint64_t pos_;
-    bool stop_;
     EntryService *entry_service_;
+    const std::string name_;
   };
 
-  typedef EntryService::Iterator<false> ReverseIterator;
+  class ReverseIterator : public EntryService::Iterator {
+   public:
+    ReverseIterator(EntryService *entry_service, uint64_t pos,
+        const std::string& name);
+    virtual uint64_t advance() override;
+  };
 
-  ReverseIterator NewReverseIterator(uint64_t pos) {
-    return ReverseIterator(this, pos);
-  }
+  class ForwardIterator : public EntryService::Iterator {
+   public:
+    ForwardIterator(EntryService *entry_service, uint64_t pos);
+    virtual uint64_t advance() override;
+  };
 
-  class IntentionIterator : private EntryService::Iterator<true> {
+  class IntentionIterator : private EntryService::ForwardIterator {
    public:
     IntentionIterator(EntryService *entry_service, uint64_t pos);
     boost::optional<std::shared_ptr<Intention>> Next();
   };
 
-  IntentionIterator NewIntentionIterator(uint64_t pos);
-
-  class AfterImageIterator : private EntryService::Iterator<true> {
+  class AfterImageIterator : private EntryService::ForwardIterator {
    public:
     AfterImageIterator(EntryService *entry_service, uint64_t pos);
     boost::optional<std::pair<uint64_t,
       std::shared_ptr<cruzdb_proto::AfterImage>>> Next();
   };
 
+  ReverseIterator NewReverseIterator(uint64_t pos, const std::string& name);
+  IntentionIterator NewIntentionIterator(uint64_t pos);
   AfterImageIterator NewAfterImageIterator(uint64_t pos);
 
   uint64_t Append(cruzdb_proto::Intention& intention) const;

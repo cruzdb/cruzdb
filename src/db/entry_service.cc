@@ -75,37 +75,48 @@ void EntryService::IOEntry()
             // a fill policy, and really we shouldn't have holes in our
             // single-node setup, so we just spin on the hole for now...
             continue;
+          } else if (ret == -ENODATA) {
+            break;
           }
           assert(0);
         }
 
-        RecordTick(stats_, LOG_READS);
-        RecordTick(stats_, BYTES_READ, data.size());
-
-        cruzdb_proto::LogEntry entry;
-        assert(entry.ParseFromString(data));
-        assert(entry.IsInitialized());
-
         CacheEntry cache_entry;
 
-        switch (entry.type()) {
-          case cruzdb_proto::LogEntry::AFTER_IMAGE:
-            cache_entry.type = CacheEntry::EntryType::AFTERIMAGE;
-            cache_entry.after_image =
-              std::make_shared<cruzdb_proto::AfterImage>(
-                  std::move(entry.after_image()));
-            ai_matcher.push(entry.after_image(), next);
-            break;
+        if (ret == 0) {
+          RecordTick(stats_, LOG_READS);
+          RecordTick(stats_, BYTES_READ, data.size());
 
-          case cruzdb_proto::LogEntry::INTENTION:
-            cache_entry.type = CacheEntry::EntryType::INTENTION;
-            cache_entry.intention = std::make_shared<Intention>(
-                entry.intention(), next);
-            break;
+          cruzdb_proto::LogEntry entry;
+          assert(entry.ParseFromString(data));
+          assert(entry.IsInitialized());
 
-          default:
-            assert(0);
-            exit(1);
+          switch (entry.type()) {
+            case cruzdb_proto::LogEntry::AFTER_IMAGE:
+              cache_entry.type = CacheEntry::EntryType::AFTERIMAGE;
+              cache_entry.after_image =
+                std::make_shared<cruzdb_proto::AfterImage>(
+                    std::move(entry.after_image()));
+              ai_matcher.push(entry.after_image(), next);
+              break;
+
+            case cruzdb_proto::LogEntry::INTENTION:
+              cache_entry.type = CacheEntry::EntryType::INTENTION;
+              cache_entry.intention = std::make_shared<Intention>(
+                  entry.intention(), next);
+              break;
+
+            default:
+              assert(0);
+              exit(1);
+          }
+        } else if (ret == -ENODATA) {
+          cache_entry.type = CacheEntry::EntryType::FILLED;
+          RecordTick(stats_, LOG_READS_FILLED);
+        } else {
+          std::cout << "terrible" << std::endl;
+          assert(0);
+          exit(1);
         }
 
         lk.lock();
@@ -123,15 +134,54 @@ void EntryService::IOEntry()
   }
 }
 
-EntryService::IntentionIterator
-EntryService::NewIntentionIterator(uint64_t pos)
+EntryService::Iterator::Iterator(
+    EntryService *entry_service, uint64_t pos, const std::string& name) :
+  pos_(pos),
+  entry_service_(entry_service),
+  name_(name)
 {
-  return IntentionIterator(this, pos);
+}
+
+boost::optional<
+std::pair<uint64_t, EntryService::CacheEntry>>
+EntryService::Iterator::NextEntry(bool fill)
+{
+  const auto pos = advance();
+  auto entry = entry_service_->Read(pos, fill);
+  if (entry) {
+    return std::make_pair(pos, *entry);
+  }
+  return boost::none;
+}
+
+EntryService::ReverseIterator::ReverseIterator(EntryService *entry_service,
+    uint64_t pos, const std::string& name) :
+  Iterator(entry_service, pos, name + ":rev")
+{
+}
+
+uint64_t EntryService::ReverseIterator::advance()
+{
+  // the way this is setup is that we prep for the next read. so if we read
+  // pos 0, then pos goes to 2**64 with wrap around. need assertions in here
+  // etc...
+  return pos_--;
+}
+
+EntryService::ForwardIterator::ForwardIterator(
+    EntryService *entry_service, uint64_t pos) :
+  Iterator(entry_service, pos, "fwd")
+{
+}
+
+uint64_t EntryService::ForwardIterator::advance()
+{
+  return pos_++;
 }
 
 EntryService::IntentionIterator::IntentionIterator(
     EntryService *entry_service, uint64_t pos) :
-  Iterator(entry_service, pos)
+  ForwardIterator(entry_service, pos)
 {
 }
 
@@ -149,20 +199,14 @@ EntryService::IntentionIterator::Next()
   }
 }
 
-EntryService::AfterImageIterator
-EntryService::NewAfterImageIterator(uint64_t pos)
-{
-  return AfterImageIterator(this, pos);
-}
-
 EntryService::AfterImageIterator::AfterImageIterator(
     EntryService *entry_service, uint64_t pos) :
-  Iterator(entry_service, pos)
+  ForwardIterator(entry_service, pos)
 {
 }
 
-boost::optional<std::pair<uint64_t,
-  std::shared_ptr<cruzdb_proto::AfterImage>>>
+boost::optional<
+std::pair<uint64_t, std::shared_ptr<cruzdb_proto::AfterImage>>>
 EntryService::AfterImageIterator::Next()
 {
   while (true) {
@@ -175,6 +219,25 @@ EntryService::AfterImageIterator::Next()
     }
   }
 }
+
+EntryService::ReverseIterator
+EntryService::NewReverseIterator(uint64_t pos, const std::string& name)
+{
+  return ReverseIterator(this, pos, name);
+}
+
+EntryService::IntentionIterator
+EntryService::NewIntentionIterator(uint64_t pos)
+{
+  return IntentionIterator(this, pos);
+}
+
+EntryService::AfterImageIterator
+EntryService::NewAfterImageIterator(uint64_t pos)
+{
+  return AfterImageIterator(this, pos);
+}
+
 
 boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool fill)
 {
@@ -393,8 +456,9 @@ void EntryService::Fill(uint64_t pos) const
   int delay = 1;
   while (true) {
     int ret = log_->Fill(pos);
-    if (ret == 0)
+    if (ret == 0) {
       return;
+    }
     if (ret == -EROFS) {
       std::cerr << "filling read-only pos" << std::endl;
       assert(0);
