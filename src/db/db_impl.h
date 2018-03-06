@@ -66,7 +66,17 @@ class DBImpl : public DB {
   Iterator *NewIterator(Snapshot *snapshot) override;
   int Get(const zlog::Slice& key, std::string *value) override;
 
+  // this is harder than it seems. any existing references might keep some
+  // entries in the cache alive, like the txn processor looking at the root,
+  // snapshots and iterators. Or the traces that are published to the node cache
+  // and sit there until integrated by the background gc thread...
+  //
+  // one might also want to consider waiting on the transaction processor and
+  // various flushing threads that handle after images to reach a new state
+  // since they also may be pinning nodes in memory.
   void ClearCaches() {
+    // Add some sort of flush interface TODO
+    finished_txns_.Clean();
     cache_.Clear();
     entry_service_->ClearCaches();
   }
@@ -253,7 +263,7 @@ class DBImpl : public DB {
    public:
     std::unique_ptr<PersistentTree> Find(uint64_t ipos);
     void Insert(uint64_t ipos, std::unique_ptr<PersistentTree> tree);
-    void Clean(uint64_t last_ipos);
+    void Clean(uint64_t last_ipos = std::numeric_limits<uint64_t>::max());
 
    private:
     mutable std::mutex lock_;

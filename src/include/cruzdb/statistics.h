@@ -12,6 +12,8 @@ enum Tickers : uint32_t {
   LOG_READS,
   LOG_READS_FILLED,
   LOG_READS_UNWRITTEN,
+  LOG_READ_CACHE_HIT,
+  NODE_CACHE_HIT,
   BYTES_WRITTEN,
   BYTES_READ,
   TICKER_ENUM_MAX
@@ -22,6 +24,8 @@ const std::vector<std::pair<Tickers, std::string>> TickersNameMap = {
   {LOG_READS, "cruzdb.log.reads"},
   {LOG_READS_FILLED, "cruzdb.log.reads_filled"},
   {LOG_READS_UNWRITTEN, "cruzdb.log.reads_unwritten"},
+  {LOG_READ_CACHE_HIT, "cruzdb.log.read.cache.hit"},
+  {NODE_CACHE_HIT, "cruzdb.node.cache.hit"},
   {BYTES_WRITTEN, "cruzdb.bytes.written"},
   {BYTES_READ, "cruzdb.bytes.read"},
 };

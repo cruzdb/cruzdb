@@ -127,6 +127,7 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
   // is the node in the cache?
   auto it = nodes_.find(key);
   if (it != nodes_.end()) {
+    RecordTick(stats_, NODE_CACHE_HIT);
     entry& e = it->second;
     nodes_lru_.erase(e.lru_iter);
     nodes_lru_.emplace_front(key);

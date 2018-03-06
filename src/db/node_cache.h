@@ -89,11 +89,14 @@ class NodeCache {
     }
   }
 
-  // drop everything in the cache
+  // drop everything in the cache. this also tries to clear out all of the
+  // pending traces too, but that tough to guarantee if racing with the vaccum.
   void Clear() {
+    cond_.notify_one();
     {
       std::lock_guard<std::mutex> l(lock_);
       imap_.clear();
+      traces_.clear();
     }
     for (size_t slot = 0; slot < num_slots_; slot++) {
       auto& shard = shards_[slot];
@@ -104,6 +107,7 @@ class NodeCache {
         auto key = nodes_lru_.back();
         auto nit = nodes_.find(key);
         assert(nit != nodes_.end());
+        used_bytes_ -= nit->second.node->ByteSize();
         nodes_.erase(nit);
         nodes_lru_.pop_back();
       }

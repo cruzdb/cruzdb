@@ -246,6 +246,7 @@ boost::optional<EntryService::CacheEntry> EntryService::Read(uint64_t pos, bool 
   // check cache for target position
   auto it = entry_cache_.find(pos);
   if (it != entry_cache_.end()) {
+    RecordTick(stats_, LOG_READ_CACHE_HIT);
     return it->second;
   }
 
@@ -547,6 +548,7 @@ EntryService::ReadAfterImage(const uint64_t pos)
   if (it != entry_cache_.end()) {
     assert(it->second.type ==
         CacheEntry::EntryType::AFTERIMAGE);
+    RecordTick(stats_, LOG_READ_CACHE_HIT);
     return it->second.after_image;
   }
 
@@ -616,6 +618,7 @@ EntryService::ReadIntentions(const std::vector<uint64_t>& positions)
     auto it = entry_cache_.find(pos);
     if (it != entry_cache_.end()) {
       assert(it->second.type == CacheEntry::EntryType::INTENTION);
+      RecordTick(stats_, LOG_READ_CACHE_HIT);
       intentions.emplace_back(it->second.intention);
     } else {
       missing_positions.emplace_back(pos);

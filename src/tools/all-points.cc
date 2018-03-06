@@ -60,18 +60,41 @@ static std::vector<std::string> fill(cruzdb::DB *db, size_t num_items)
 
 static void read_key(cruzdb::DB *db, const std::string& key)
 {
+  //std::this_thread::sleep_for(std::chrono::milliseconds(10));
   static_cast<cruzdb::DBImpl*>(db)->ClearCaches();
   int ret = stats->Reset();
   assert(ret);
+
+  auto before = stats->ToString();
 
   std::string value;
   ret = db->Get(key, &value);
   assert(ret == 0);
 
+  auto after = stats->ToString();
+
+  if (stats->getTickerCount(cruzdb::Tickers::LOG_READS) == 0) {
+    std::cout << "BEFORE ========================" << std::endl << before << std::endl;
+    std::cout << "AFTER ========================" << std::endl << after << std::endl;
+  }
+
+  // it may seem weird that there are no accesses that require only 1 log read.
+  // this is because for all the access that read 2 log entries perform an
+  // intention to afterimage translation using the iterator resolution strategy
+  // that requires reading more from the log. generally this is cached, but this
+  // also points to an optimization opportunity to perhaps do some snapshotting
+  // of index entries. another option is to figure out if it makes sense to keep
+  // that cache around for the particular benchmark we are running (i.e. not
+  // clear it out during cache clear steps).
+  //
+  // at the very least we need remember this so that we can answer questions
+  // about what might seem like a weird result.
+#if 1
   if (out)
     *out
     << stats->getTickerCount(cruzdb::Tickers::LOG_READS)
     << std::endl;
+#endif
 }
 
 int main(int argc, char **argv)
@@ -119,6 +142,14 @@ int main(int argc, char **argv)
   assert(ret == 0);
 
   auto keys = fill(db, num_items);
+
+  // this waits for the txn processor and other stuff to finish up which might
+  // be holding references to tree nodes. those references prevent the cache
+  // clearing from being effective leading to possible key access that have
+  // cache hits which isn't good for our experiment that expects all accesses to
+  // hit the log. instead of sleeping here, the log should expose a flush
+  // interface!
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
   for (auto& key : keys) {
     read_key(db, key);
