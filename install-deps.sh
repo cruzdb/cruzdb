@@ -24,7 +24,7 @@ function debs() {
     apt-get install -y cmake libprotobuf-dev \
       protobuf-compiler libboost-system-dev \
       libboost-program-options-dev lcov \
-      default-jdk
+      default-jdk libunwind-dev
 }
 
 function rpms() {
@@ -69,7 +69,7 @@ function rpms() {
 
   $SUDO $yumdnf install -y cmake boost-devel \
     protobuf-devel protobuf-compiler java-devel lcov \
-    libatomic python-virtualenv ${extra}
+    libatomic python-virtualenv libunwind-devel ${extra}
 }
 
 source /etc/os-release

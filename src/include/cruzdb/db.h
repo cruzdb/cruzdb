@@ -4,6 +4,7 @@
 #include <zlog/log.h>
 #include "iterator.h"
 #include "transaction.h"
+#include "options.h"
 
 namespace spdlog {
   class logger;
@@ -23,10 +24,12 @@ class DB {
   DB(const DB&) = delete;
   void operator=(const DB&) = delete;
 
-  static int Open(zlog::Log *log, bool create_if_empty, DB **db);
-  static int Open(zlog::Log *log, bool create_if_empty, DB **db,
-      std::shared_ptr<spdlog::logger> logger);
+  static int Open(const Options& options, zlog::Log *log,
+      bool create_if_empty, DB **db);
 
+  static int Open(const Options& options, zlog::Log *log,
+      bool create_if_empty, DB **db,
+      std::shared_ptr<spdlog::logger> logger);
 
   /*
    *

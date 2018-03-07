@@ -7,24 +7,28 @@
 
 namespace cruzdb {
 
-DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
+DBImpl::DBImpl(const Options& options, zlog::Log *log,
+    const RestorePoint& point,
     std::unique_ptr<EntryService> entry_service,
     std::shared_ptr<spdlog::logger> logger) :
-  log_(log),
-  cache_(log, this),
+  cache_(options, log, this),
   stop_(false),
   entry_service_(std::move(entry_service)),
   intention_iterator_(entry_service_->NewIntentionIterator(point.replay_start_pos)),
   in_flight_txn_rid_(-1),
   root_(Node::Nil(), this),
+#if 0
   metrics_http_server_({"listening_ports", "0.0.0.0:8080", "num_threads", "1"}),
+#endif
   metrics_handler_(this),
-  logger_(logger)
+  logger_(logger),
+  options_(options),
+  stats_(options.statistics.get())
 {
   entry_service_->Start(point.replay_start_pos);
 
   auto root = cache_.CacheAfterImage(*point.after_image, point.after_image_pos);
-  root_.replace(root);
+  root_ = root;
 
   root_snapshot_ = point.after_image->intention();
   last_intention_processed_ = root_snapshot_;
@@ -38,7 +42,9 @@ DBImpl::DBImpl(zlog::Log *log, const RestorePoint& point,
 
   janitor_thread_ = std::thread(&DBImpl::JanitorEntry, this);
 
+#if 0
   metrics_http_server_.addHandler("/metrics", &metrics_handler_);
+#endif
 }
 
 DBImpl::~DBImpl()
@@ -60,9 +66,10 @@ DBImpl::~DBImpl()
   afterimage_finalizer_thread_.join();
 
   cache_.Stop();
-
+#if 0
   metrics_http_server_.removeHandler("/metrics");
   metrics_http_server_.close();
+#endif
 }
 
 Snapshot *DBImpl::GetSnapshot()
@@ -101,7 +108,7 @@ int DBImpl::FindRestorePoint(EntryService *entry_service, RestorePoint& point,
 
   bool set_latest_intention = false;
 
-  auto it = entry_service->NewReverseIterator(tail);
+  auto it = entry_service->NewReverseIterator(tail, "find_restore_point");
   while (true) {
     auto entry = it.NextEntry(true);
     // if hole, skip. see github issue #33
@@ -343,12 +350,17 @@ void DBImpl::ReplayIntention(PersistentTree *tree, const Intention& intention)
 
       case cruzdb_proto::TransactionOp::PUT:
         assert(op.has_val());
-        tree->Put(PREFIX_USER, op.key(), op.val());
+        tree->Put(op.key(), op.val());
         break;
 
       case cruzdb_proto::TransactionOp::DELETE:
         assert(!op.has_val());
         tree->Delete(PREFIX_USER, op.key());
+        break;
+
+      case cruzdb_proto::TransactionOp::COPY:
+        assert(!op.has_val());
+        tree->Copy(op.key());
         break;
 
       default:
@@ -372,9 +384,13 @@ void DBImpl::TransactionProcessorEntry()
     if (logger_)
       logger_->info("txn-proc: ipos {}", intention_pos);
 
-    // serial intention?
+    // serial intention? a flush intention is also treated like serial in that
+    // it has no conflicts. be careful that serial doesn't examine anything in
+    // the flush intention that might not be set given the flush intention's
+    // special cases.
     assert(root_snapshot_ < intention_pos);
-    const auto serial = root_snapshot_ == intention->Snapshot();
+    const auto serial = root_snapshot_ == intention->Snapshot() ||
+      intention->Flush();
 
     // check for conflicts
     bool abort;
@@ -451,7 +467,7 @@ void DBImpl::TransactionProcessorEntry()
 
     std::unique_lock<std::mutex> lk(lock_);
 
-    root_.replace(root);
+    root_ = root;
     root_snapshot_ = intention_pos;
 
     assert(last_intention_processed_ < intention_pos);
@@ -550,6 +566,73 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   bool committed = txn_finder_.WaitOnTransaction(waiter, pos);
 
   return committed;
+}
+
+// 1. when we do gc, we should also probably be removing entries from the
+// committed intention index
+//
+// 2. it might be smart to use metadata to avoid copying nodes that were already
+// moved forward through some other process after they were identified for gc.
+//
+// 3. the order of gc might actually matter depending on if we end up creating
+// node copies where the children are further back in the log...
+void DBImpl::gc()
+{
+  auto node = root_.ref_notrace();
+
+  std::map<NodeAddress, std::string> addrs;
+  std::stack<SharedNodeRef> stack;
+  while (!stack.empty() || node != Node::Nil()) {
+    if (node != Node::Nil()) {
+      stack.push(node);
+      node = node->left.ref_notrace();
+    } else {
+      node = stack.top();
+      stack.pop();
+
+      auto left_node = node->left.ref_notrace();
+      if (left_node != Node::Nil()) {
+        auto addr = node->left.Address();
+        assert(addr);
+        auto ret = addrs.emplace(*addr, left_node->key().ToString());
+        assert(ret.second);
+        if (addrs.size() > 5) {
+          addrs.erase(--addrs.end());
+        }
+      }
+
+      auto right_node = node->right.ref_notrace();
+      if (right_node != Node::Nil()) {
+        auto addr = node->right.Address();
+        assert(addr);
+        auto ret = addrs.emplace(*addr, right_node->key().ToString());
+        assert(ret.second);
+        if (addrs.size() > 5) {
+          addrs.erase(--addrs.end());
+        }
+      }
+
+      node = node->right.ref_notrace();
+    }
+  }
+
+  auto flush = std::unique_ptr<Intention>(
+      new Intention(0, 0));
+
+  for (auto& addr : addrs) {
+    std::cout << addr.first << "/" << addr.second << " ";
+    flush->Copy(addr.second);
+  }
+  std::cout << std::endl;
+
+  auto pos = entry_service_->Append(std::move(flush));
+
+  std::unique_lock<std::mutex> lk(lock_);
+  while (last_intention_processed_ < pos) {
+    lk.unlock();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    lk.lock();
+  }
 }
 
 void DBImpl::TransactionFinder::AddTokenWaiter(

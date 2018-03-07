@@ -49,7 +49,8 @@ class DBImpl : public DB {
   static int FindRestorePoint(EntryService *entry_service, RestorePoint& point,
       uint64_t& latest_intention);
 
-  DBImpl(zlog::Log *log, const RestorePoint& point,
+  DBImpl(const Options& options, zlog::Log *log,
+      const RestorePoint& point,
       std::unique_ptr<EntryService> entry_service,
       std::shared_ptr<spdlog::logger> logger);
 
@@ -65,6 +66,20 @@ class DBImpl : public DB {
   Iterator *NewIterator(Snapshot *snapshot) override;
   int Get(const zlog::Slice& key, std::string *value) override;
 
+  // this is harder than it seems. any existing references might keep some
+  // entries in the cache alive, like the txn processor looking at the root,
+  // snapshots and iterators. Or the traces that are published to the node cache
+  // and sit there until integrated by the background gc thread...
+  //
+  // one might also want to consider waiting on the transaction processor and
+  // various flushing threads that handle after images to reach a new state
+  // since they also may be pinning nodes in memory.
+  void ClearCaches() {
+    // Add some sort of flush interface TODO
+    finished_txns_.Clean();
+    cache_.Clear();
+    entry_service_->ClearCaches();
+  }
 
   // verify that the root tree is a red-black tree
  public:
@@ -79,6 +94,9 @@ class DBImpl : public DB {
   boost::optional<uint64_t> IntentionToAfterImage(uint64_t intention_pos);
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
       boost::optional<NodeAddress>& address);
+
+ public:
+  void gc();
 
   // transaction processing
  public:
@@ -183,7 +201,6 @@ class DBImpl : public DB {
   }
 
   mutable std::mutex lock_;
-  zlog::Log *log_;
   NodeCache cache_;
   bool stop_;
 
@@ -246,7 +263,7 @@ class DBImpl : public DB {
    public:
     std::unique_ptr<PersistentTree> Find(uint64_t ipos);
     void Insert(uint64_t ipos, std::unique_ptr<PersistentTree> tree);
-    void Clean(uint64_t last_ipos);
+    void Clean(uint64_t last_ipos = std::numeric_limits<uint64_t>::max());
 
    private:
     mutable std::mutex lock_;
@@ -277,11 +294,15 @@ class DBImpl : public DB {
   std::condition_variable janitor_cond_;
   std::thread janitor_thread_;
 
+#if 0
   CivetServer metrics_http_server_;
+#endif
   MetricsHandler metrics_handler_;
   struct DBStats db_stats_;
 
   std::shared_ptr<spdlog::logger> logger_;
+  Options options_;
+  Statistics *stats_;
 };
 
 }

@@ -37,7 +37,8 @@ void Java_org_cruzdb_CruzDB_openNative(JNIEnv *env, jobject jobj,
   auto log = reinterpret_cast<zlog::Log*>(jdbHandle);
 
   cruzdb::DB *db;
-  int ret = cruzdb::DB::Open(log, jcreate, &db);
+  cruzdb::Options options;
+  int ret = cruzdb::DB::Open(options, log, jcreate, &db);
   if (ret) {
     CruzDBExceptionJni::ThrowNew(env, ret);
     return;

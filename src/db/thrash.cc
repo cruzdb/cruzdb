@@ -204,7 +204,8 @@ int main(int argc, char **argv)
     assert(ret == 0);
 
     cruzdb::DB *db;
-    ret = cruzdb::DB::Open(log, true, &db);
+    cruzdb::Options options;
+    ret = cruzdb::DB::Open(options, log, true, &db);
     assert(ret == 0);
 
     std::vector<cruzdb::Snapshot*> db_history;

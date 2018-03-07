@@ -43,6 +43,7 @@ message TransactionOp {
        GET = 0;
        PUT = 1;
        DELETE = 2;
+       COPY = 3;
     }
     required OpType op  = 1;
     required string key = 2;
@@ -55,7 +56,11 @@ message TransactionOp {
 message Intention {
     required uint64 snapshot = 1;
     required uint64 token = 2;
-    repeated TransactionOp ops = 3;
+
+    // a flush intention ignores the snapshot and token
+    required bool flush = 3;
+
+    repeated TransactionOp ops = 4;
 }
 
 message LogEntry {

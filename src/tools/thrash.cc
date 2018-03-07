@@ -8,6 +8,8 @@
 #include <boost/program_options.hpp>
 #include "port/stack_trace.h"
 #include "cruzdb/db.h"
+#include "db/db_impl.h"
+#include "include/cruzdb/statistics.h"
 
 namespace po = boost::program_options;
 
@@ -61,6 +63,8 @@ static void runner(cruzdb::DB *db,
       std::numeric_limits<uint32_t>::min(),
       std::numeric_limits<uint32_t>::max());
 
+  auto dbi = static_cast<cruzdb::DBImpl*>(db);
+
   for (int i = 0; i < 1000; i++) {
     auto txn = db->BeginTransaction();
     uint32_t nkey = dis(gen);
@@ -69,6 +73,7 @@ static void runner(cruzdb::DB *db,
     cc_map[key] = key;
     txn->Commit();
     delete txn;
+    dbi->gc();
   }
 }
 
@@ -93,14 +98,18 @@ int main(int argc, char **argv)
   po::notify(vm);
 
   auto logger = spdlog::stdout_color_mt("cruzdb");
-  rocksdb::port::InstallStackTraceHandler();
+  cruzdb::InstallStackTraceHandler();
 
   zlog::Log *log;
   int ret = zlog::Log::Create("ram", "log", {}, "", "", &log);
   assert(ret == 0);
 
+  auto stats = cruzdb::CreateDBStatistics();
+
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db);
+  cruzdb::Options options;
+  options.statistics = stats;
+  ret = cruzdb::DB::Open(options, log, true, &db);
   assert(ret == 0);
 
   std::vector<std::thread> threads;
@@ -121,6 +130,8 @@ int main(int argc, char **argv)
 
   auto db_map = get_map(db, db->GetSnapshot());
   assert(db_map == cc_map);
+
+  std::cout << "STATISTICS:" << std::endl << stats->ToString();
 
   delete db;
   delete log;

@@ -55,14 +55,15 @@ int main(int argc, char **argv)
     stop_after = atoi(argv[2]);
   }
 
-  rocksdb::port::InstallStackTraceHandler();
+  cruzdb::InstallStackTraceHandler();
 
   zlog::Log *log;
   int ret = zlog::Log::Create("lmdb", "log", {{"path", db_path}}, "", "", &log);
   assert(ret == 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, true, &db);
   assert(ret == 0);
 
   std::random_device rd;

@@ -175,7 +175,8 @@ TEST(DB, EquivHistory) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, true, &db);
   ASSERT_EQ(ret, 0);
 
   std::vector<cruzdb::Snapshot*> db_history;
@@ -240,7 +241,8 @@ TEST(DB, Iterator) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, true, &db);
   ASSERT_EQ(ret, 0);
 
   std::vector<std::string> strs{"m", "f", "t"};
@@ -301,7 +303,8 @@ TEST(DB, Get) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, true, &db);
   ASSERT_EQ(ret, 0);
 
   std::vector<std::string> strs{"a", "b", ""};
@@ -350,7 +353,8 @@ TEST(DB, ReOpen) {
     ASSERT_EQ(ret, 0);
 
     cruzdb::DB *db;
-    ret = cruzdb::DB::Open(log, true, &db);
+    cruzdb::Options options;
+    ret = cruzdb::DB::Open(options, log, true, &db);
     ASSERT_EQ(0, ret);
 
     for (int i = 0; i < 150; i++) {
@@ -383,7 +387,8 @@ TEST(DB, ReOpen) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, false, &db);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, false, &db);
   ASSERT_EQ(ret, 0);
 
   std::map<std::string, std::string> curr_db;
@@ -408,7 +413,8 @@ TEST(Txn, WriteWriteConflict) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, true, &db);
   ASSERT_EQ(ret, 0);
 
   // note this txn+commit causes the next two transactions created to have
@@ -440,7 +446,8 @@ TEST(Txn, WriteWriteNoConflict) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db, logger);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, true, &db, logger);
   ASSERT_EQ(ret, 0);
 
   // note this txn+commit causes the next two transactions created to have
@@ -474,7 +481,8 @@ TEST(Txn, WriteWriteConflictSnapInit) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, true, &db);
   ASSERT_EQ(ret, 0);
 
   auto txn1 = db->BeginTransaction();
@@ -501,7 +509,8 @@ TEST(Txn, WriteWriteNoConflictSnapInit) {
   ASSERT_EQ(ret, 0);
 
   cruzdb::DB *db;
-  ret = cruzdb::DB::Open(log, true, &db, logger);
+  cruzdb::Options options;
+  ret = cruzdb::DB::Open(options, log, true, &db, logger);
   ASSERT_EQ(ret, 0);
 
   auto txn1 = db->BeginTransaction();
@@ -521,7 +530,7 @@ TEST(Txn, WriteWriteNoConflictSnapInit) {
 int main(int argc, char **argv)
 {
   logger = spdlog::stdout_color_mt("cruzdb");
-  rocksdb::port::InstallStackTraceHandler();
+  cruzdb::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
