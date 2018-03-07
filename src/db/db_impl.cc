@@ -594,7 +594,8 @@ void DBImpl::gc()
       if (left_node != Node::Nil()) {
         auto addr = node->left.Address();
         assert(addr);
-        addrs.emplace(*addr, left_node->key().ToString());
+        auto ret = addrs.emplace(*addr, left_node->key().ToString());
+        assert(ret.second);
         if (addrs.size() > 5) {
           addrs.erase(--addrs.end());
         }
@@ -604,7 +605,8 @@ void DBImpl::gc()
       if (right_node != Node::Nil()) {
         auto addr = node->right.Address();
         assert(addr);
-        addrs.emplace(*addr, right_node->key().ToString());
+        auto ret = addrs.emplace(*addr, right_node->key().ToString());
+        assert(ret.second);
         if (addrs.size() > 5) {
           addrs.erase(--addrs.end());
         }
@@ -623,7 +625,14 @@ void DBImpl::gc()
   }
   std::cout << std::endl;
 
-  entry_service_->Append(std::move(flush));
+  auto pos = entry_service_->Append(std::move(flush));
+
+  std::unique_lock<std::mutex> lk(lock_);
+  while (last_intention_processed_ < pos) {
+    lk.unlock();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    lk.lock();
+  }
 }
 
 void DBImpl::TransactionFinder::AddTokenWaiter(
