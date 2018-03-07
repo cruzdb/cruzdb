@@ -71,7 +71,7 @@ class Intention {
     // we slowly fed copy operations through the transaction stream, an aborted
     // intention would mean special handling to avoid losing the copy operation.
     // for this reason we simplify for now by not allowing mixed operations.
-    std::optional<bool> copying;
+    boost::optional<bool> copying;
     for (const auto& op : intention_.ops()) {
       if (op.op() == cruzdb_proto::TransactionOp::COPY) {
         if (!copying) {
