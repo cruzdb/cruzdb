@@ -71,6 +71,7 @@ void NodeCache::do_vaccum_()
           left -= nit->second.node->ByteSize();
           nodes_.erase(nit);
           nodes_lru_.pop_back();
+          RecordTick(stats_, NODE_CACHE_FREE);
         }
       }
     }
@@ -88,6 +89,8 @@ void NodeCache::do_vaccum_()
 SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
     boost::optional<NodeAddress>& address)
 {
+  RecordTick(stats_, NODE_CACHE_FETCHES);
+
   uint64_t afterimage;
   auto offset = address->Offset();
   if (address->IsAfterImage()) {
@@ -107,6 +110,8 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
           assert(0);
           exit(1);
         }
+        // TODO: asynchronsly cache the nodes in any non-target afterimages that
+        // are read?
         if (ai->second->intention() == intention) {
           afterimage = ai->first;
           break;
@@ -153,14 +158,30 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
 
   auto ai = db_->entry_service_->ReadAfterImage(afterimage);
 
-  // TODO: this probably changes when resolving through intention rather than
-  // after image no?
+  // cache all the nodes in the after image then return the one we care about.
+  // it's technically possible that after node is cached its removed, but lru
+  // should always prevent that. in any case, we handle that expliclty.
+  CacheAfterImage(*ai, afterimage);
+
+  RecordTick(stats_, NODE_CACHE_NODES_READ, ai->tree_size());
+
+  // its probably there now
+  lk.lock();
+  it = nodes_.find(key);
+  if (it != nodes_.end()) {
+    entry& e = it->second;
+    nodes_lru_.erase(e.lru_iter);
+    nodes_lru_.emplace_front(key);
+    e.lru_iter = nodes_lru_.begin();
+    return e.node;
+  }
+
+  // on the off chance that it isn't there, we'll just deserialize explicitly.
+  lk.unlock();
   auto nn = deserialize_node(*ai, afterimage, offset);
 
-  // add to cache. make sure it didn't show up after we released the lock to
-  // read the node from the log.
+  // look one more time before inserting it into the cache
   lk.lock();
-
   it = nodes_.find(key);
   if (it != nodes_.end()) {
     entry& e = it->second;

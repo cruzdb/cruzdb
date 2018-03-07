@@ -18,6 +18,10 @@ class EntryService {
  public:
   EntryService(const Options& options, Statistics *statistics, zlog::Log *log);
 
+  // TODO: add a safety mechanism to ensure parts of the interface are not used
+  // unless it has been started. Or actually make part of the service static
+  // interfaces, and then create a constructor that requires the starting
+  // position to be specified.
   void Start(uint64_t pos);
   void Stop();
 

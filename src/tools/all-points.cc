@@ -58,43 +58,50 @@ static std::vector<std::string> fill(cruzdb::DB *db, size_t num_items)
   return keys;
 }
 
+// one would expect the smallest number of log reads to be 1, but in most cases
+// it is two due to the resolution of intention pointers. generally this
+// translation is cached, but we also clear this index when we clear the cache.
+// it certainly represents the worst case, and could probably be not be cleared
+// and still be argued to be realistic. at the very least we just need to
+// remember the settings and scenarios like this so we can answer questions
+// about results that seem strange.
 static void read_key(cruzdb::DB *db, const std::string& key)
 {
-  //std::this_thread::sleep_for(std::chrono::milliseconds(10));
   static_cast<cruzdb::DBImpl*>(db)->ClearCaches();
   int ret = stats->Reset();
   assert(ret);
-
-  auto before = stats->ToString();
 
   std::string value;
   ret = db->Get(key, &value);
   assert(ret == 0);
 
-  auto after = stats->ToString();
+  // clearing cache worked: we should be reading the log!
+  assert(stats->getTickerCount(cruzdb::Tickers::LOG_READS) > 0);
 
-  if (stats->getTickerCount(cruzdb::Tickers::LOG_READS) == 0) {
-    std::cout << "BEFORE ========================" << std::endl << before << std::endl;
-    std::cout << "AFTER ========================" << std::endl << after << std::endl;
-  }
+  // the cache should be large enough to hold all the nodes read. this means we
+  // don't need to worry about double counting etc...
+  assert(stats->getTickerCount(cruzdb::Tickers::NODE_CACHE_FREE) == 0);
 
-  // it may seem weird that there are no accesses that require only 1 log read.
-  // this is because for all the access that read 2 log entries perform an
-  // intention to afterimage translation using the iterator resolution strategy
-  // that requires reading more from the log. generally this is cached, but this
-  // also points to an optimization opportunity to perhaps do some snapshotting
-  // of index entries. another option is to figure out if it makes sense to keep
-  // that cache around for the particular benchmark we are running (i.e. not
-  // clear it out during cache clear steps).
-  //
-  // at the very least we need remember this so that we can answer questions
-  // about what might seem like a weird result.
-#if 1
-  if (out)
+  // the total number of nodes fetched from the node cache during tree
+  // traversal. for a Get() operation this would be at most the height of the
+  // tree.
+  auto num_fetches = stats->getTickerCount(cruzdb::Tickers::NODE_CACHE_FETCHES);
+
+  // the total number of nodes fetched from the node cache during tree traversal
+  // that were already in the cache.
+  auto cache_hits = stats->getTickerCount(cruzdb::Tickers::NODE_CACHE_HIT);
+
+  // the total number of nodes read out of afterimages and added to the cache.
+  // this includes nodes in an afterimage that may never be accessed. 
+  auto nodes_read = stats->getTickerCount(cruzdb::Tickers::NODE_CACHE_NODES_READ);
+
+  if (out) {
     *out
-    << stats->getTickerCount(cruzdb::Tickers::LOG_READS)
-    << std::endl;
-#endif
+      << num_fetches << ","
+      << cache_hits << ","
+      << nodes_read
+      << std::endl;
+  }
 }
 
 int main(int argc, char **argv)
@@ -148,8 +155,13 @@ int main(int argc, char **argv)
   // clearing from being effective leading to possible key access that have
   // cache hits which isn't good for our experiment that expects all accesses to
   // hit the log. instead of sleeping here, the log should expose a flush
-  // interface!
+  // interface to let intentions in flight make it through the txn processing
+  // pipeline.
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+  if (out) {
+    *out << "num_fetches,cache_hits,nodes_read" << std::endl;
+  }
 
   for (auto& key : keys) {
     read_key(db, key);
