@@ -568,6 +568,57 @@ bool DBImpl::CompleteTransaction(TransactionImpl *txn)
   return committed;
 }
 
+std::map<uint64_t, std::pair<uint64_t, uint64_t>>
+DBImpl::reachable_node_stats()
+{
+  auto node = root_.ref_notrace();
+
+  // build a list of all node addresses that are reachable
+  std::map<NodeAddress, std::string> addrs;
+  std::stack<SharedNodeRef> stack;
+  while (!stack.empty() || node != Node::Nil()) {
+    if (node != Node::Nil()) {
+      stack.push(node);
+      node = node->left.ref_notrace();
+    } else {
+      node = stack.top();
+      stack.pop();
+
+      auto left_node = node->left.ref_notrace();
+      if (left_node != Node::Nil()) {
+        auto addr = node->left.Address();
+        assert(addr);
+        auto ret = addrs.emplace(*addr, left_node->key().ToString());
+        assert(ret.second);
+      }
+
+      auto right_node = node->right.ref_notrace();
+      if (right_node != Node::Nil()) {
+        auto addr = node->right.Address();
+        assert(addr);
+        auto ret = addrs.emplace(*addr, right_node->key().ToString());
+        assert(ret.second);
+      }
+
+      node = node->right.ref_notrace();
+    }
+  }
+
+  // ai_pos --> (num nodes, num reachable)
+  std::map<uint64_t, std::pair<uint64_t, uint64_t>> usage;
+
+  for (auto addr : addrs) {
+    auto ai_addr = cache_.findAfterImagePosition(addr.first);
+    if (usage.find(ai_addr) == usage.end()) {
+      auto ai = entry_service_->ReadAfterImage(ai_addr);
+      usage.emplace(ai_addr, std::make_pair(ai->tree_size(), 0));
+    }
+    usage[ai_addr].second++;
+  }
+
+  return usage;
+}
+
 // 1. when we do gc, we should also probably be removing entries from the
 // committed intention index
 //

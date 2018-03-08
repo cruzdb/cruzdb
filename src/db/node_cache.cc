@@ -78,27 +78,15 @@ void NodeCache::do_vaccum_()
   }
 }
 
-// when resolving a node we only resolve the single node. figuring out when to
-// resolve an entire intention would be interesting.
-//
-// when fetching an address, it will either be an afterimage address, or it will
-// be an intention that resolves to an afterimage. that resolution will always
-// succeed because we don't let the in-memory pointer expire until after we've
-// created an index entry. when reading nodes from the log, pointers with
-// intentions are resolved before being allowed into memory.
-SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
-    boost::optional<NodeAddress>& address)
+uint64_t NodeCache::findAfterImagePosition(
+    const boost::optional<NodeAddress>& address)
 {
-  RecordTick(stats_, NODE_CACHE_FETCHES);
-
-  uint64_t afterimage;
-  auto offset = address->Offset();
   if (address->IsAfterImage()) {
-    afterimage = address->Position();
+    return address->Position();
   } else {
     auto tmp = IntentionToAfterImage(address->Position());
     if (tmp) {
-      afterimage = *tmp;
+      return *tmp;
     } else {
       const auto intention = address->Position();
       const auto pos = intention + 1;
@@ -113,12 +101,29 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
         // TODO: asynchronsly cache the nodes in any non-target afterimages that
         // are read?
         if (ai->second->intention() == intention) {
-          afterimage = ai->first;
+          return ai->first;
           break;
         }
       }
     }
   }
+}
+
+// when resolving a node we only resolve the single node. figuring out when to
+// resolve an entire intention would be interesting.
+//
+// when fetching an address, it will either be an afterimage address, or it will
+// be an intention that resolves to an afterimage. that resolution will always
+// succeed because we don't let the in-memory pointer expire until after we've
+// created an index entry. when reading nodes from the log, pointers with
+// intentions are resolved before being allowed into memory.
+SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
+    boost::optional<NodeAddress>& address)
+{
+  RecordTick(stats_, NODE_CACHE_FETCHES);
+
+  const uint64_t afterimage = findAfterImagePosition(address);
+  const auto offset = address->Offset();
 
   auto key = std::make_pair(afterimage, offset);
 
