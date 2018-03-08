@@ -58,6 +58,9 @@ class NodeCache {
   NodePtr ApplyAfterImageDelta(const std::vector<SharedNodeRef>& delta,
       uint64_t after_image_pos);
 
+  uint64_t findAfterImagePosition(
+      const boost::optional<NodeAddress>& address);
+
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
       boost::optional<NodeAddress>& address);
 

@@ -97,6 +97,8 @@ class DBImpl : public DB {
 
  public:
   void gc();
+  std::map<uint64_t, std::pair<uint64_t, uint64_t>>
+    reachable_node_stats();
 
   // transaction processing
  public:

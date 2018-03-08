@@ -107,13 +107,13 @@ static void read_key(cruzdb::DB *db, const std::string& key)
 int main(int argc, char **argv)
 {
   size_t num_items;
-  std::string out_file;
+  std::string name;
 
   po::options_description opts("General options");
   opts.add_options()
     ("help,h", "show help message")
     ("num-items", po::value<size_t>(&num_items)->default_value(1000), "num items")
-    ("output", po::value<std::string>(&out_file)->default_value(""), "output file")
+    ("output", po::value<std::string>(&name)->default_value(""), "output file")
   ;
 
   po::variables_map vm;
@@ -126,12 +126,24 @@ int main(int argc, char **argv)
 
   po::notify(vm);
 
+  std::string reachable_stats = name + "_reachable.csv";
+  std::ofstream reachable_stats_outfile;
+  std::ostream *reachable_stats_out;
+  if (name.size()) {
+    if (name == "-") {
+      reachable_stats_out = &std::cout;
+    } else {
+      reachable_stats_outfile.open(reachable_stats, std::ios::trunc);
+      reachable_stats_out = &reachable_stats_outfile;
+    }
+  }
+
   std::ofstream ofile;
-  if (out_file.size()) {
-    if (out_file == "-") {
+  if (name.size()) {
+    if (name == "-") {
       out = &std::cout;
     } else {
-      ofile.open(out_file, std::ios::trunc);
+      ofile.open(name, std::ios::trunc);
       out = &ofile;
     }
   }
@@ -167,12 +179,21 @@ int main(int argc, char **argv)
     read_key(db, key);
   }
 
+  if (reachable_stats_out) {
+    *reachable_stats_out << "pos,reachable,total" << std::endl;
+    auto usage = static_cast<cruzdb::DBImpl*>(db)->reachable_node_stats();
+    for (auto it : usage) {
+      *reachable_stats_out << it.first << "," << it.second.second
+        << "," << it.second.first << std::endl;
+    }
+  }
+
   delete db;
   delete log;
 
-  if (out_file.size()) {
+  if (name.size()) {
     ofile.flush();
-    if (out_file != "-")
+    if (name != "-")
       ofile.close();
   }
 
