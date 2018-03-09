@@ -14,7 +14,9 @@
 namespace po = boost::program_options;
 
 static std::shared_ptr<cruzdb::Statistics> stats;
-static std::ostream *out;
+
+static std::ostream *key_fetch_stats_out;
+static std::ostream *reachable_stats_out;
 
 static inline std::string tostr(uint64_t value)
 {
@@ -95,8 +97,8 @@ static void read_key(cruzdb::DB *db, const std::string& key)
   // this includes nodes in an afterimage that may never be accessed. 
   auto nodes_read = stats->getTickerCount(cruzdb::Tickers::NODE_CACHE_NODES_READ);
 
-  if (out) {
-    *out
+  if (key_fetch_stats_out) {
+    *key_fetch_stats_out
       << num_fetches << ","
       << cache_hits << ","
       << nodes_read
@@ -113,7 +115,7 @@ int main(int argc, char **argv)
   opts.add_options()
     ("help,h", "show help message")
     ("num-items", po::value<size_t>(&num_items)->default_value(1000), "num items")
-    ("output", po::value<std::string>(&name)->default_value(""), "output file")
+    ("name", po::value<std::string>(&name)->default_value(""), "name")
   ;
 
   po::variables_map vm;
@@ -126,25 +128,21 @@ int main(int argc, char **argv)
 
   po::notify(vm);
 
-  std::string reachable_stats = name + "_reachable.csv";
   std::ofstream reachable_stats_outfile;
-  std::ostream *reachable_stats_out;
+  std::ofstream key_fetch_stats_outfile;
+
+  std::string reachable_stats = name + "_reachable.csv";
+  std::string key_fetch_stats = name + "_key_fetches.csv";
+
   if (name.size()) {
     if (name == "-") {
       reachable_stats_out = &std::cout;
+      key_fetch_stats_out = &std::cout;
     } else {
       reachable_stats_outfile.open(reachable_stats, std::ios::trunc);
       reachable_stats_out = &reachable_stats_outfile;
-    }
-  }
-
-  std::ofstream ofile;
-  if (name.size()) {
-    if (name == "-") {
-      out = &std::cout;
-    } else {
-      ofile.open(name, std::ios::trunc);
-      out = &ofile;
+      key_fetch_stats_outfile.open(key_fetch_stats, std::ios::trunc);
+      key_fetch_stats_out = &key_fetch_stats_outfile;
     }
   }
 
@@ -171,8 +169,8 @@ int main(int argc, char **argv)
   // pipeline.
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-  if (out) {
-    *out << "num_fetches,cache_hits,nodes_read" << std::endl;
+  if (key_fetch_stats_out) {
+    *key_fetch_stats_out << "num_fetches,cache_hits,nodes_read" << std::endl;
   }
 
   for (auto& key : keys) {
@@ -192,9 +190,12 @@ int main(int argc, char **argv)
   delete log;
 
   if (name.size()) {
-    ofile.flush();
-    if (name != "-")
-      ofile.close();
+    reachable_stats_outfile.flush();
+    key_fetch_stats_outfile.flush();
+    if (name != "-") {
+      reachable_stats_outfile.close();
+      key_fetch_stats_outfile.close();
+    }
   }
 
   return 0;
