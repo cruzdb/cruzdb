@@ -160,6 +160,13 @@ class EntryService {
   std::shared_ptr<cruzdb_proto::AfterImage>
     ReadAfterImage(const uint64_t pos);
 
+  std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
+    ReadAfterImageRandomNodes(uint64_t pos, int offset, float f) const;
+  std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
+    ReadAllAfterImageNodes(uint64_t pos) const;
+  std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
+    ReadAfterImageNode(uint64_t pos, int offset) const;
+
   // Read intentions at the provided positions. It is a fatal error if any
   // position does not contain an intention.
   std::vector<std::shared_ptr<Intention>> ReadIntentions(

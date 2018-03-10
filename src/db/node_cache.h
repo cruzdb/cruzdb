@@ -53,6 +53,8 @@ class NodeCache {
     vaccum_ = std::thread(&NodeCache::do_vaccum_, this);
   }
 
+  void CacheAfterImageNodes(std::map<int, cruzdb_proto::Node>& nodes,
+      uint64_t intention, uint64_t pos);
   NodePtr CacheAfterImage(const cruzdb_proto::AfterImage& i,
       uint64_t pos);
   NodePtr ApplyAfterImageDelta(const std::vector<SharedNodeRef>& delta,
@@ -148,8 +150,8 @@ class NodeCache {
 
   lru_cache<uint64_t, uint64_t> imap_;
 
-  SharedNodeRef deserialize_node(const cruzdb_proto::AfterImage& i,
-      uint64_t pos, int index) const;
+  SharedNodeRef deserialize_node(const cruzdb_proto::Node& n,
+      uint64_t intention, uint64_t pos) const;
 
   std::thread vaccum_;
   std::condition_variable cond_;

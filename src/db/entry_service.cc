@@ -502,8 +502,110 @@ uint64_t EntryService::Append(cruzdb_proto::Intention& intention) const
   return Append(blob);
 }
 
+std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
+EntryService::ReadAfterImageRandomNodes(uint64_t pos, int offset, float f) const
+{
+  std::string data;
+  std::set<int> keys;
+  keys.insert(offset);
+  std::map<int, std::string> vals;
+  int ret = log_->Read(pos, &data, keys, f, &vals);
+  assert(ret == 0);
+
+  uint64_t intention;
+  {
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+    assert(entry.type() == cruzdb_proto::LogEntry::AFTER_IMAGE);
+    intention = entry.after_image().intention();
+  }
+
+  std::map<int, cruzdb_proto::Node> out;
+  for (auto it : vals) {
+    cruzdb_proto::Node node;
+    assert(node.ParseFromString(it.second));
+    assert(node.IsInitialized());
+    out.emplace(it.first, node);
+  }
+
+  assert(out.find(offset) != out.end());
+
+  return std::make_pair(intention, out);
+}
+
+std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
+EntryService::ReadAfterImageNode(uint64_t pos, int offset) const
+{
+  std::string data;
+  std::set<int> keys;
+  keys.insert(offset);
+  std::map<int, std::string> vals;
+  int ret = log_->Read(pos, &data, keys, &vals);
+  assert(ret == 0);
+
+  uint64_t intention;
+  {
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+    assert(entry.type() == cruzdb_proto::LogEntry::AFTER_IMAGE);
+    intention = entry.after_image().intention();
+  }
+
+  std::map<int, cruzdb_proto::Node> out;
+  for (auto it : vals) {
+    cruzdb_proto::Node node;
+    assert(node.ParseFromString(it.second));
+    assert(node.IsInitialized());
+    out.emplace(it.first, node);
+  }
+
+  assert(out.find(offset) != out.end());
+
+  return std::make_pair(intention, out);
+}
+
+std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
+EntryService::ReadAllAfterImageNodes(uint64_t pos) const
+{
+  std::string data;
+  std::map<int, std::string> vals;
+  int ret = log_->Read(pos, &data, &vals);
+  assert(ret == 0);
+
+  uint64_t intention;
+  {
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+    assert(entry.type() == cruzdb_proto::LogEntry::AFTER_IMAGE);
+    intention = entry.after_image().intention();
+  }
+
+  std::map<int, cruzdb_proto::Node> out;
+  for (auto it : vals) {
+    cruzdb_proto::Node node;
+    assert(node.ParseFromString(it.second));
+    assert(node.IsInitialized());
+    out.emplace(it.first, node);
+  }
+
+  return std::make_pair(intention, out);
+}
+
 uint64_t EntryService::Append(cruzdb_proto::AfterImage& after_image) const
 {
+  // build the kv pairs for the nodes. the design of the kv pairs interface is
+  // super awkward because a Slice can be stored as a value, but it doesn't own
+  // the data that it points to.
+  std::map<int, std::string> nodes;
+  for (auto i = 0; i < after_image.tree_size(); i++) {
+    std::string blob;
+    assert(after_image.tree(i).SerializeToString(&blob));
+    nodes.emplace(i, std::move(blob));
+  }
+
   cruzdb_proto::LogEntry entry;
   entry.set_type(cruzdb_proto::LogEntry::AFTER_IMAGE);
   entry.set_allocated_after_image(&after_image);
@@ -513,7 +615,17 @@ uint64_t EntryService::Append(cruzdb_proto::AfterImage& after_image) const
   assert(entry.SerializeToString(&blob));
   entry.release_after_image();
 
-  return Append(blob);
+  int delay = 1;
+  while (true) {
+    uint64_t pos;
+    int ret = log_->Append(blob, nodes, &pos);
+    if (ret == 0) {
+      return pos;
+    }
+    std::cerr << "failed to append ret " << ret << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    delay = std::min(delay*10, 1000);
+  }
 }
 
 uint64_t EntryService::Append(std::unique_ptr<Intention> intention)

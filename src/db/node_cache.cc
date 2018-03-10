@@ -161,14 +161,43 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
     }
   }
 
+#if 0
+  // read all the nodes in the afterimage using the new fine-grained API
+  auto ai = db_->entry_service_->ReadAllAfterImageNodes(afterimage);
+#endif
+
+#if 0
+  // read only the node that is missing
+  auto ai = db_->entry_service_->ReadAfterImageNode(afterimage, offset);
+#endif
+
+#if 1
+  // read only the node that is missing
+  auto ai = db_->entry_service_->ReadAfterImageRandomNodes(afterimage, offset, 0.5);
+  //std::cout << ai.second.size() << std::endl;
+#endif
+
+#if 0
+  // old way is to read the entire afterimage blob up and cache all the nodes
+  // inside it. the new way is that we can still do that, but we can also
+  // selectively read nodes.
   auto ai = db_->entry_service_->ReadAfterImage(afterimage);
+#endif
 
   // cache all the nodes in the after image then return the one we care about.
   // it's technically possible that after node is cached its removed, but lru
   // should always prevent that. in any case, we handle that expliclty.
+#if 1
+  CacheAfterImageNodes(ai.second, ai.first, afterimage);
+#else
+  // this is the version used by reading the afterimage blob. the new version
+  // just takes the nodes we read. NOTE that that CacheAfterImage is still used,
+  // but just by the db initialization code. since that is done once and then we
+  // clear cache for each Get(), it won't affect stats for our experiments.
   CacheAfterImage(*ai, afterimage);
+#endif
 
-  RecordTick(stats_, NODE_CACHE_NODES_READ, ai->tree_size());
+  RecordTick(stats_, NODE_CACHE_NODES_READ, ai.second.size());
 
   // its probably there now
   lk.lock();
@@ -181,30 +210,11 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
     return e.node;
   }
 
-  // on the off chance that it isn't there, we'll just deserialize explicitly.
-  lk.unlock();
-  auto nn = deserialize_node(*ai, afterimage, offset);
-
-  // look one more time before inserting it into the cache
-  lk.lock();
-  it = nodes_.find(key);
-  if (it != nodes_.end()) {
-    entry& e = it->second;
-    nodes_lru_.erase(e.lru_iter);
-    nodes_lru_.emplace_front(key);
-    e.lru_iter = nodes_lru_.begin();
-    return e.node;
-  }
-
-  nodes_lru_.emplace_front(key);
-  auto iter = nodes_lru_.begin();
-  auto res = nodes_.insert(
-      std::make_pair(key, entry{nn, iter}));
-  assert(res.second);
-
-  used_bytes_ += nn->ByteSize();
-
-  return nn;
+  // this is a rare case where it was evicted after caching the nodes and when
+  // we looked. its easy to handle, but we're skipping it here for now. blow up
+  // if there is an issue.
+  assert(0);
+  exit(1);
 }
 
 // disabling resolution during node deserialization because currently when
@@ -237,6 +247,40 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
 //  ptr.set_ref(e.node);
 //}
 
+void NodeCache::CacheAfterImageNodes(std::map<int, cruzdb_proto::Node>& nodes,
+    uint64_t intention, uint64_t pos)
+{
+  if (nodes.empty()) {
+    assert(0);
+    return;
+  }
+
+  for (auto it : nodes) {
+    auto nn = deserialize_node(it.second, intention, pos);
+    auto key = std::make_pair(pos, it.first);
+
+    auto slot = pair_hash()(key) % num_slots_;
+    auto& shard = shards_[slot];
+    auto& nodes_ = shard->nodes;
+    auto& nodes_lru_ = shard->lru;
+
+    std::unique_lock<std::mutex> lk(shard->lock);
+
+    auto it2 = nodes_.find(key);
+    if (it2 != nodes_.end()) {
+      continue;
+    }
+
+    nodes_lru_.emplace_front(key);
+    auto iter = nodes_lru_.begin();
+    auto res = nodes_.insert(
+        std::make_pair(key, entry{nn, iter}));
+    assert(res.second);
+
+    used_bytes_ += nn->ByteSize();
+  }
+}
+
 NodePtr NodeCache::CacheAfterImage(const cruzdb_proto::AfterImage& i,
     uint64_t pos)
 {
@@ -250,7 +294,7 @@ NodePtr NodeCache::CacheAfterImage(const cruzdb_proto::AfterImage& i,
   for (idx = 0; idx < i.tree_size(); idx++) {
 
     // no locking on deserialize_node is OK
-    nn = deserialize_node(i, pos, idx);
+    nn = deserialize_node(i.tree(idx), i.intention(), pos);
 
     auto key = std::make_pair(pos, idx);
 
@@ -285,13 +329,11 @@ NodePtr NodeCache::CacheAfterImage(const cruzdb_proto::AfterImage& i,
   return ret;
 }
 
-SharedNodeRef NodeCache::deserialize_node(const cruzdb_proto::AfterImage& i,
-    uint64_t pos, int index) const
+SharedNodeRef NodeCache::deserialize_node(const cruzdb_proto::Node& n,
+    uint64_t intention, uint64_t pos) const
 {
-  const cruzdb_proto::Node& n = i.tree(index);
-
   auto nn = std::make_shared<Node>(n.key(), n.val(), n.red(),
-      nullptr, nullptr, i.intention(), false, db_);
+      nullptr, nullptr, intention, false, db_);
 
   if (!n.left().nil()) {
     uint16_t offset = n.left().off();
