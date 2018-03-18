@@ -214,9 +214,9 @@ boost::optional<uint64_t> DBImpl::IntentionToAfterImage(uint64_t intention_pos)
 }
 
 SharedNodeRef DBImpl::fetch(std::vector<NodeAddress>& trace,
-    boost::optional<NodeAddress>& address)
+    boost::optional<NodeAddress>& address, const zlog::Slice *key)
 {
-  return cache_.fetch(trace, address);
+  return cache_.fetch(trace, address, key);
 }
 
 int DBImpl::Get(const zlog::Slice& key, std::string *value)
@@ -230,7 +230,7 @@ int DBImpl::Get(const zlog::Slice& key, std::string *value)
   auto pskey = prefix_string(PREFIX_USER, key.ToString());
   const zlog::Slice pkey(pskey);
 
-  auto cur = root.ref(trace);
+  auto cur = root.ref(trace, pkey);
   while (cur != Node::Nil()) {
     int cmp = pkey.compare(zlog::Slice(cur->key().data(),
           cur->key().size()));
@@ -239,8 +239,8 @@ int DBImpl::Get(const zlog::Slice& key, std::string *value)
       UpdateLRU(trace);
       return 0;
     }
-    cur = cmp < 0 ? cur->left.ref(trace) :
-      cur->right.ref(trace);
+    cur = cmp < 0 ? cur->left.ref(trace, pkey) :
+      cur->right.ref(trace, pkey);
   }
   UpdateLRU(trace);
   return -ENOENT;

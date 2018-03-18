@@ -64,7 +64,8 @@ class NodeCache {
       const boost::optional<NodeAddress>& address);
 
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
-      boost::optional<NodeAddress>& address);
+      boost::optional<NodeAddress>& address,
+      const zlog::Slice *key = nullptr);
 
   boost::optional<uint64_t> IntentionToAfterImage(uint64_t intention_pos) {
     std::lock_guard<std::mutex> l(lock_);

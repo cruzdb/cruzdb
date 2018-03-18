@@ -503,6 +503,39 @@ uint64_t EntryService::Append(cruzdb_proto::Intention& intention) const
 }
 
 std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
+EntryService::ReadAfterImageNodesWithTarget(uint64_t pos, int offset,
+    const zlog::Slice *key_target) const
+{
+  std::string data;
+  std::set<int> keys;
+  keys.insert(offset);
+  std::map<int, std::string> vals;
+  int ret = log_->Read(pos, &data, key_target, keys, &vals);
+  assert(ret == 0);
+
+  uint64_t intention;
+  {
+    cruzdb_proto::LogEntry entry;
+    assert(entry.ParseFromString(data));
+    assert(entry.IsInitialized());
+    assert(entry.type() == cruzdb_proto::LogEntry::AFTER_IMAGE);
+    intention = entry.after_image().intention();
+  }
+
+  std::map<int, cruzdb_proto::Node> out;
+  for (auto it : vals) {
+    cruzdb_proto::Node node;
+    assert(node.ParseFromString(it.second));
+    assert(node.IsInitialized());
+    out.emplace(it.first, node);
+  }
+
+  assert(out.find(offset) != out.end());
+
+  return std::make_pair(intention, out);
+}
+
+std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
 EntryService::ReadAfterImageRandomNodes(uint64_t pos, int offset, float f) const
 {
   std::string data;

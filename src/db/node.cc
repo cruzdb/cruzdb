@@ -5,10 +5,10 @@
 namespace cruzdb {
 
 SharedNodeRef NodePtr::fetch(boost::optional<NodeAddress>& address,
-    std::vector<NodeAddress>& trace)
+    std::vector<NodeAddress>& trace, const zlog::Slice *key)
 {
   assert(db_);
-  return db_->fetch(trace, address);
+  return db_->fetch(trace, address, key);
 }
 
 }

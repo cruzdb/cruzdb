@@ -161,6 +161,9 @@ class EntryService {
     ReadAfterImage(const uint64_t pos);
 
   std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
+    ReadAfterImageNodesWithTarget(uint64_t pos, int offset,
+        const zlog::Slice *key_target) const;
+  std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
     ReadAfterImageRandomNodes(uint64_t pos, int offset, float f) const;
   std::pair<uint64_t, std::map<int, cruzdb_proto::Node>>
     ReadAllAfterImageNodes(uint64_t pos) const;

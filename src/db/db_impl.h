@@ -93,7 +93,8 @@ class DBImpl : public DB {
   void UpdateLRU(std::vector<NodeAddress>& trace);
   boost::optional<uint64_t> IntentionToAfterImage(uint64_t intention_pos);
   SharedNodeRef fetch(std::vector<NodeAddress>& trace,
-      boost::optional<NodeAddress>& address);
+      boost::optional<NodeAddress>& address,
+      const zlog::Slice *key);
 
  public:
   void gc();

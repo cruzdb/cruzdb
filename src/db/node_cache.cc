@@ -118,7 +118,8 @@ uint64_t NodeCache::findAfterImagePosition(
 // created an index entry. when reading nodes from the log, pointers with
 // intentions are resolved before being allowed into memory.
 SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
-    boost::optional<NodeAddress>& address)
+    boost::optional<NodeAddress>& address,
+    const zlog::Slice *key_target)
 {
   RecordTick(stats_, NODE_CACHE_FETCHES);
 
@@ -171,9 +172,16 @@ SharedNodeRef NodeCache::fetch(std::vector<NodeAddress>& trace,
   auto ai = db_->entry_service_->ReadAfterImageNode(afterimage, offset);
 #endif
 
-#if 1
+#if 0
   // read only the node that is missing
   auto ai = db_->entry_service_->ReadAfterImageRandomNodes(afterimage, offset, 0.5);
+  //std::cout << ai.second.size() << std::endl;
+#endif
+
+#if 1
+  // read only the node that is missing
+  auto ai = db_->entry_service_->ReadAfterImageNodesWithTarget(afterimage, offset,
+      key_target);
   //std::cout << ai.second.size() << std::endl;
 #endif
 

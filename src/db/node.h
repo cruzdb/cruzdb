@@ -131,6 +131,30 @@ class NodePtr {
     }
   }
 
+  inline SharedNodeRef ref(std::vector<NodeAddress>& trace,
+      const zlog::Slice& key) {
+    std::unique_lock<std::mutex> lk(lock_);
+    if (address_) {
+      trace.emplace_back(*address_);
+    }
+    while (true) {
+      if (auto ret = ref_.lock()) {
+        return ret;
+      } else {
+        assert(address_);
+        auto address = address_;
+        lk.unlock();
+        auto node = fetch(address, trace, &key);
+        lk.lock();
+        if (auto ret = ref_.lock()) {
+          return ret;
+        } else {
+          ref_ = node;
+        }
+      }
+    }
+  }
+
   // deference a node without providing a trace. this is used by the db that
   // doesn't maintain a trace. ideally we want to always (or nearly always)
   // have a trace. this is only for convenience in some routines that do
@@ -184,7 +208,8 @@ class NodePtr {
   DBImpl *db_;
 
   SharedNodeRef fetch(boost::optional<NodeAddress>& address,
-      std::vector<NodeAddress>& trace);
+      std::vector<NodeAddress>& trace,
+      const zlog::Slice *key = nullptr);
 };
 
 /*
