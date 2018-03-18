@@ -34,15 +34,18 @@ TEST(Foo, Bar) {
   Tree<std::string, std::string> tree;
   std::map<std::string, std::string> truth;
 
+  uint64_t rid = 0;
+
   // build a bunch of snapshots
   for (int i = 0; i < 500; i++) {
     for (int j = 0; j < 50; j++) {
+      OpContext ctx = { rid++ };
       const std::string key = tostr(dis(gen));
       if (coin(gen) < coin_toss) {
-        tree = tree.insert(key, key);
+        tree = tree.insert(ctx, key, key);
         truth.emplace(key, key);
       } else {
-        tree = tree.remove(key);
+        tree = tree.remove(ctx, key);
         truth.erase(key);
       }
     }
