@@ -47,32 +47,38 @@ class Tree {
       right(right)
     {}
 
-    Node(const bool red, const key_type& key, const mapped_type& value) :
-      red(red),
-      entry(std::make_shared<const Entry>(key, value))
-    {}
+    static inline auto makeNode(const bool red, const entry_ptr_type& entry,
+        const node_ptr_type& left, const node_ptr_type& right) {
+      return std::make_shared<const Node>(red, entry, left, right);
+    }
+
+    static inline auto makeNode(const bool red, const key_type& key,
+        const mapped_type& value, const node_ptr_type& left,
+        const node_ptr_type& right) {
+      const auto entry = std::make_shared<const Entry>(key, value);
+      return makeNode(red, entry, left, right);
+    }
 
    public:
     inline auto copyWithEntry(const key_type& key,
         const mapped_type& value) const {
-      const auto new_entry = std::make_shared<const Entry>(key, value);
-      return std::make_shared<const Node>(red, new_entry, left, right);
+      return makeNode(red, key, value, left, right);
     }
 
-    inline auto copyWithLeft(const node_ptr_type& left) const {
-      return std::make_shared<const Node>(red, entry, left, right);
+    inline auto copyWithLeft(const node_ptr_type& new_left) const {
+      return makeNode(red, entry, new_left, right);
     }
 
-    inline auto copyWithRight(const node_ptr_type& right) const {
-      return std::make_shared<const Node>(red, entry, left, right);
+    inline auto copyWithRight(const node_ptr_type& new_right) const {
+      return makeNode(red, entry, left, new_right);
     }
 
     inline auto copyAsBlack() const {
-      return std::make_shared<const Node>(false, entry, left, right);
+      return makeNode(false, entry, left, right);
     }
 
     inline auto copyAsRed() const {
-      return std::make_shared<const Node>(true, entry, left, right);
+      return makeNode(true, entry, left, right);
     }
 
    public:
@@ -102,7 +108,7 @@ class Tree {
           return std::pair(new_node, false);
         }
       } else {
-        const auto new_node = std::make_shared<const Node>(true, key, value);
+        const auto new_node = makeNode(true, key, value, nullptr, nullptr);
         return std::pair(new_node, true);
       }
     }
@@ -113,19 +119,19 @@ class Tree {
         if (left && left->red) {
           // case: (Some(R), Some(R), ..)
           if (left->left && left->left->red) {
-            const auto new_left = std::make_shared<Node>(
+            const auto new_left = makeNode(
                 false,
                 left->left->entry,
                 left->left->left,
                 left->left->right);
 
-            const auto new_right = std::make_shared<Node>(
+            const auto new_right = makeNode(
                 false,
                 entry,
                 left->right,
                 right);
 
-            return std::make_shared<const Node>(
+            return makeNode(
                 true,
                 left->entry,
                 new_left,
@@ -133,19 +139,19 @@ class Tree {
 
             // case: (Some(R), _, Some(R), ..)
           } else if (left->right && left->right->red) {
-            const auto new_left = std::make_shared<Node>(
+            const auto new_left = makeNode(
                 false,
                 left->entry,
                 left->left,
                 left->right->left);
 
-            const auto new_right = std::make_shared<Node>(
+            const auto new_right = makeNode(
                 false,
                 entry,
                 left->right->right,
                 right);
 
-            return std::make_shared<const Node>(
+            return makeNode(
                 true,
                 left->right->entry,
                 new_left,
@@ -156,19 +162,19 @@ class Tree {
         // case: (.., Some(R), Some(R), _)
         if (right && right->red) {
           if (right->left && right->left->red) {
-            const auto new_left = std::make_shared<Node>(
+            const auto new_left = makeNode(
                 false,
                 entry,
                 left,
                 right->left->left);
 
-            const auto new_right = std::make_shared<Node>(
+            const auto new_right = makeNode(
                 false,
                 right->entry,
                 right->left->right,
                 right->right);
 
-            return std::make_shared<const Node>(
+            return makeNode(
                 true,
                 right->left->entry,
                 new_left,
@@ -176,19 +182,19 @@ class Tree {
 
             // case: (.., Some(R), _, Some(R))
           } else if (right->right && right->right->red) {
-            const auto new_left = std::make_shared<Node>(
+            const auto new_left = makeNode(
                 false,
                 entry,
                 left,
                 right->left);
 
-            const auto new_right = std::make_shared<Node>(
+            const auto new_right = makeNode(
                 false,
                 right->right->entry,
                 right->right->left,
                 right->right->right);
 
-            return std::make_shared<const Node>(
+            return makeNode(
                 true,
                 right->entry,
                 new_left,
@@ -252,7 +258,7 @@ class Tree {
       // match: (left.color, right.color)
       // case: (B, R)
       if (!left->red && right->red) {
-        return std::make_shared<const Node>(
+        return makeNode(
             true,
             right->entry,
             fuse(left, right->left),
@@ -260,7 +266,7 @@ class Tree {
 
         // case: (R, B)
       } else if (left->red && !right->red) {
-        return std::make_shared<const Node>(
+        return makeNode(
             true,
             left->entry,
             left->left,
@@ -270,32 +276,32 @@ class Tree {
       } else if (left->red && right->red) {
         const auto fused = fuse(left->right, right->left);
         if (fused && fused->red) {
-          const auto new_left = std::make_shared<const Node>(
+          const auto new_left = makeNode(
               true,
               left->entry,
               left->left,
               fused->left);
 
-          const auto new_right = std::make_shared<const Node>(
+          const auto new_right = makeNode(
               true,
               right->entry,
               fused->right,
               right->right);
 
-          return std::make_shared<const Node>(
+          return makeNode(
               true,
               fused->entry,
               new_left,
               new_right);
         }
 
-        const auto new_right = std::make_shared<const Node>(
+        const auto new_right = makeNode(
             true,
             right->entry,
             fused,
             right->right);
 
-        return std::make_shared<const Node>(
+        return makeNode(
             true,
             left->entry,
             left->left,
@@ -305,32 +311,32 @@ class Tree {
       } else if (!left->red && !right->red) {
         const auto fused = fuse(left->right, right->left);
         if (fused && fused->red) {
-          const auto new_left = std::make_shared<const Node>(
+          const auto new_left = makeNode(
               false,
               left->entry,
               left->left,
               fused->left);
 
-          const auto new_right = std::make_shared<const Node>(
+          const auto new_right = makeNode(
               false,
               right->entry,
               fused->right,
               right->right);
 
-          return std::make_shared<const Node>(
+          return makeNode(
               true,
               fused->entry,
               new_left,
               new_right);
         }
 
-        const auto new_right = std::make_shared<const Node>(
+        const auto new_right = makeNode(
             false,
             right->entry,
             fused,
             right->right);
 
-        const auto new_node = std::make_shared<const Node>(
+        const auto new_node = makeNode(
             true,
             left->entry,
             left->left,
@@ -352,7 +358,7 @@ class Tree {
         const auto new_right = node->right ?
           node->right->copyAsBlack() : node->right;
 
-        return std::make_shared<const Node>(
+        return makeNode(
             true,
             node->entry,
             new_left,
@@ -367,13 +373,13 @@ class Tree {
       // match: (color_l, color_r, color_r_l)
       // case: (Some(R), ..)
       if (node->left && node->left->red) {
-        const auto new_left = std::make_shared<const Node>(
+        const auto new_left = makeNode(
             false,
             node->left->entry,
             node->left->left,
             node->left->right);
 
-        return std::make_shared<const Node>(
+        return makeNode(
             true,
             node->entry,
             new_left,
@@ -381,13 +387,13 @@ class Tree {
 
         // case: (_, Some(B), _)
       } else if (node->right && !node->right->red) {
-        const auto new_right = std::make_shared<const Node>(
+        const auto new_right = makeNode(
             true,
             node->right->entry,
             node->right->left,
             node->right->right);
 
-        const auto new_node = std::make_shared<const Node>(
+        const auto new_node = makeNode(
             false,
             node->entry,
             node->left,
@@ -399,7 +405,7 @@ class Tree {
       } else if (node->right && node->right->red &&
           node->right->left && !node->right->left->red) {
 
-        const auto unbalanced_new_right = std::make_shared<const Node>(
+        const auto unbalanced_new_right = makeNode(
             false,
             node->right->entry,
             node->right->left->right,
@@ -407,13 +413,13 @@ class Tree {
 
         const auto new_right = balance(unbalanced_new_right);
 
-        const auto new_left = std::make_shared<const Node>(
+        const auto new_left = makeNode(
             false,
             node->entry,
             node->left,
             node->right->left->left);
 
-        return std::make_shared<const Node>(
+        return makeNode(
             true,
             node->right->left->entry,
             new_left,
@@ -427,13 +433,13 @@ class Tree {
       // match: (color_l, color_l_r, color_r)
       // case: (.., Some(R))
       if (node->right && node->right->red) {
-        const auto new_right = std::make_shared<const Node>(
+        const auto new_right = makeNode(
             false,
             node->right->entry,
             node->right->left,
             node->right->right);
 
-        return std::make_shared<const Node>(
+        return makeNode(
             true,
             node->entry,
             node->left,
@@ -441,13 +447,13 @@ class Tree {
 
         // case: (Some(B), ..)
       } else if (node->left && !node->left->red) {
-        const auto new_left = std::make_shared<const Node>(
+        const auto new_left = makeNode(
             true,
             node->left->entry,
             node->left->left,
             node->left->right);
 
-        const auto new_node = std::make_shared<const Node>(
+        const auto new_node = makeNode(
             false,
             node->entry,
             new_left,
@@ -459,7 +465,7 @@ class Tree {
       } else if (node->left && node->left->red &&
           node->left->right && !node->left->right->red) {
 
-        const auto unbalanced_new_left = std::make_shared<const Node>(
+        const auto unbalanced_new_left = makeNode(
             false,
             node->left->entry,
             node->left->left->copyAsRed(),
@@ -467,13 +473,13 @@ class Tree {
 
         const auto new_left = balance(unbalanced_new_left);
 
-        const auto new_right = std::make_shared<const Node>(
+        const auto new_right = makeNode(
             false,
             node->entry,
             node->left->right->right,
             node->right);
 
-        return std::make_shared<const Node>(
+        return makeNode(
             true,
             node->left->right->entry,
             new_left,
@@ -487,7 +493,7 @@ class Tree {
         const node_ptr_type& node, const key_type& key) {
       const auto [new_left, removed] = remove(node->left, key);
 
-      const auto new_node = std::make_shared<const Node>(
+      const auto new_node = makeNode(
           true, // In case of rebalance the color does not matter
           node->entry,
           new_left,
@@ -504,7 +510,7 @@ class Tree {
         const node_ptr_type& node, const key_type& key) {
       const auto [new_right, removed] = remove(node->right, key);
 
-      const auto new_node = std::make_shared<const Node>(
+      const auto new_node = makeNode(
           true, // In case of rebalance the color does not matter
           node->entry,
           node->left,

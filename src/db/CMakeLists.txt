@@ -25,3 +25,9 @@ if (CMAKE_BUILD_TYPE STREQUAL "Coverage")
   setup_target_for_coverage(cruzdb_test_db_coverage
     cruzdb_test_db coverage)
 endif()
+
+add_executable(cruzdb_test_ptree ptree_test.cc)
+target_link_libraries(cruzdb_test_ptree
+  stack_trace
+  gtest_main)
+install(TARGETS cruzdb_test_ptree DESTINATION bin)
