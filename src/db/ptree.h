@@ -99,27 +99,27 @@ class Tree {
           const auto [new_left, is_new_key] = insert(ctx, node->left, key, value);
           const auto new_node = node->copyWithLeft(ctx, new_left);
           if (is_new_key) {
-            return std::pair(new_node->balance(ctx), is_new_key);
+            return std::make_pair(new_node->balance(ctx), is_new_key);
           } else {
-            return std::pair(new_node, is_new_key);
+            return std::make_pair(new_node, is_new_key);
           }
 
         } else if (key > node->entry->key) {
           const auto [new_right, is_new_key] = insert(ctx, node->right, key, value);
           const auto new_node = node->copyWithRight(ctx, new_right);
           if (is_new_key) {
-            return std::pair(new_node->balance(ctx), is_new_key);
+            return std::make_pair(new_node->balance(ctx), is_new_key);
           } else {
-            return std::pair(new_node, is_new_key);
+            return std::make_pair(new_node, is_new_key);
           }
 
         } else {
           const auto new_node = node->copyWithEntry(ctx, key, value);
-          return std::pair(new_node, false);
+          return std::make_pair(new_node, false);
         }
       } else {
         const auto new_node = makeNode(ctx, true, key, value, nullptr, nullptr);
-        return std::pair(new_node, true);
+        return std::make_pair(new_node, true);
       }
     }
 
@@ -536,7 +536,7 @@ class Tree {
       const auto balanced_new_node = left_black ?
         balance_left(ctx, new_node) : new_node;
 
-      return std::pair(balanced_new_node, removed);
+      return std::make_pair(balanced_new_node, removed);
     }
 
     static std::pair<node_ptr_type, bool> remove_right(const OpContext& ctx,
@@ -553,7 +553,7 @@ class Tree {
       const auto bal_new_node = right_black ?
         balance_right(ctx, new_node) : new_node;
 
-      return std::pair(bal_new_node, removed);
+      return std::make_pair(bal_new_node, removed);
     }
 
     static std::pair<node_ptr_type, bool> remove(const OpContext& ctx,
@@ -565,10 +565,10 @@ class Tree {
           return remove_right(ctx, node, key);
         } else {
           const auto new_node = fuse(ctx, node->left, node->right);
-          return std::pair(new_node, true);
+          return std::make_pair(new_node, true);
         }
       } else {
-        return std::pair(nullptr, false);
+        return std::make_pair(nullptr, false);
       }
     }
 
