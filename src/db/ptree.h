@@ -471,8 +471,8 @@ class Tree {
             new_right);
 
         const auto balanced = balance(ctx, new_node);
-
         new_node->put();
+
         return balanced;
 
         // case: (_, Some(R), Some(B))
@@ -632,6 +632,10 @@ class Tree {
 
     inline void put() const {
       if (refcount_.fetch_sub(1) == 1) {
+        if (left)
+          left->put();
+        if (right)
+          right->put();
         delete this;
       }
     }
@@ -653,6 +657,41 @@ class Tree {
     size_(0)
   {}
 
+  Tree(Tree&& other) = delete;
+
+  ~Tree() {
+    if (root_)
+      root_->put();
+  }
+
+  Tree(const Tree& other) :
+    root_(other.root_),
+    size_(other.size_)
+  {
+    if (root_)
+      root_->get();
+  }
+
+  Tree& operator=(const Tree& other) {
+    if (root_)
+      root_->put();
+    root_ = other.root_;
+    size_ = other.size_;
+    if (root_)
+      root_->get();
+    return *this;
+  }
+
+  Tree& operator=(Tree&& other) {
+    if (root_)
+      root_->put();
+    root_ = other.root_;
+    size_ = other.size_;
+    other.root_ = nullptr;
+    other.size_ = 0;
+    return *this;
+  }
+
  private:
   Tree(const Node *root, std::size_t size) :
     root_(root), size_(size)
@@ -663,6 +702,7 @@ class Tree {
       const mapped_type& value) const {
     const auto [mb_new_root, is_new_key] = Node::insert(ctx, root_, key, value);
     const auto new_root = mb_new_root->copyAsBlack(ctx); // mb = maybe black
+    mb_new_root->put();
     const auto new_size = size_ + (is_new_key ? 1 : 0);
     return Tree(new_root, new_size);
   }
@@ -670,18 +710,24 @@ class Tree {
   Tree remove(const OpContext& ctx, const key_type& key) const {
     const auto [mb_new_root, removed] = Node::remove(ctx, root_, key);
     if (removed) {
-      const auto new_root = mb_new_root ?
-        mb_new_root->copyAsBlack(ctx) : mb_new_root;
-      return Tree(new_root, size_ - 1);
+      if (mb_new_root) {
+        const auto new_root = mb_new_root->copyAsBlack(ctx);
+        mb_new_root->put();
+        return Tree(new_root, size_ - 1);
+      } else {
+        return Tree(nullptr, size_ - 1);
+      }
     } else {
-      return *this;
+      if (mb_new_root)
+        mb_new_root->put();
+      return *this; // copy constructor takes reference
     }
   }
 
   std::map<key_type, mapped_type> items() const {
     std::map<key_type, mapped_type> out;
     auto node = root_;
-    auto s = std::stack<const Node *>(); // TODO get?
+    auto s = std::stack<const Node *>();
     while (!s.empty() || node) {
       if (node) {
         s.push(node);
@@ -698,6 +744,13 @@ class Tree {
 
   auto size() const {
     return size_;
+  }
+
+  void clear() {
+    if (root_)
+      root_->put();
+    root_ = nullptr;
+    size_ = 0;
   }
 
   bool consistent() const {
