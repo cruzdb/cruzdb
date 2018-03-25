@@ -20,7 +20,15 @@ include_directories(${CMAKE_SOURCE_DIR}/src/spdlog/include)
 
 ################################################################################
 
+set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL
+  "Disable Google benchmark tests")
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL
+  "Disable testing of Google benchmark")
+set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL
+  "Disable installing of Google benchmark")
+add_subdirectory(benchmark)
 add_subdirectory(googletest/googlemock)
+
 add_subdirectory(include)
 add_subdirectory(port)
 add_subdirectory(db)

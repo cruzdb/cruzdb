@@ -25,12 +25,15 @@ struct rng {
   std::mutex lock;
 };
 
+static std::atomic<uint64_t> rid = 0;
+
 static auto buildTree(rng& r, std::size_t size)
 {
   Tree<uint64_t, uint64_t> tree;
   while (tree.size() < size) {
+    OpContext ctx = { rid++ };
     const uint64_t key = r.next();
-    tree = tree.insert(key, key);
+    tree = tree.insert(ctx, key, key);
   }
   return tree;
 }
@@ -51,7 +54,7 @@ static void BM_Insert(benchmark::State& state)
     std::lock_guard<std::mutex> lk(lock);
 
     // build the shared tree
-    if (tree.size() != tree_size) {
+    if (tree.size() != (unsigned)tree_size) {
       tree.clear();
       tree = buildTree(r, tree_size);
     }
@@ -67,12 +70,12 @@ static void BM_Insert(benchmark::State& state)
   lk.unlock();
 
   assert(tree_size > 0);
-  assert(tree.size() == tree_size);
+  assert(tree.size() == (unsigned)tree_size);
 
   // generate set of keys to insert
   std::vector<uint64_t> keys;
   keys.reserve(num_inserts);
-  while (keys.size() < num_inserts) {
+  while (keys.size() < (unsigned)num_inserts) {
     const auto key = r.next();
     if (!tree.get(key)) {
       keys.emplace_back(key);
@@ -81,7 +84,8 @@ static void BM_Insert(benchmark::State& state)
 
   for (auto _ : state) {
     for (const auto& key : keys) {
-      benchmark::DoNotOptimize(tree.insert(key, key));
+      OpContext ctx = { rid++ };
+      benchmark::DoNotOptimize(tree.insert(ctx, key, key));
     }
   }
 

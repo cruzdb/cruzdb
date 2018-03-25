@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 #include <cstddef>
+#include <boost/optional.hpp>
 
 struct OpContext {
   const uint64_t rid;
@@ -28,6 +29,7 @@ class Tree {
 
   typedef Key key_type;
   typedef T   mapped_type;
+  typedef std::pair<Key, T> value_type;
 
   struct Entry {
     Entry(const key_type& key, const mapped_type& value) :
@@ -657,19 +659,25 @@ class Tree {
     size_(0)
   {}
 
-  Tree(Tree&& other) = delete;
-
-  ~Tree() {
-    if (root_)
-      root_->put();
-  }
-
   Tree(const Tree& other) :
     root_(other.root_),
     size_(other.size_)
   {
     if (root_)
       root_->get();
+  }
+
+  Tree(Tree&& other) :
+    root_(other.root_),
+    size_(other.size_)
+  {
+    other.root_ = nullptr;
+    other.size_ = 0;
+  }
+
+  ~Tree() {
+    if (root_)
+      root_->put();
   }
 
   Tree& operator=(const Tree& other) {
@@ -722,6 +730,20 @@ class Tree {
         mb_new_root->put();
       return *this; // copy constructor takes reference
     }
+  }
+
+  boost::optional<value_type> get(const key_type& key) const {
+    auto cur = root_;
+    while (cur) {
+      if (key < cur->entry->key) {
+        cur = cur->left;
+      } else if (key > cur->entry->key) {
+        cur = cur->right;
+      } else {
+        return std::make_pair(cur->entry->key, cur->entry->value);
+      }
+    }
+    return boost::none;
   }
 
   std::map<key_type, mapped_type> items() const {
