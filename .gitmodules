@@ -12,3 +12,6 @@
 [submodule "src/spdlog"]
 	path = src/spdlog
 	url = https://github.com/gabime/spdlog
+[submodule "src/benchmark"]
+	path = src/benchmark
+	url = https://github.com/google/benchmark.git
