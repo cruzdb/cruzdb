@@ -25,20 +25,36 @@ class Tree {
   struct Node;
   struct Entry;
 
-  typedef std::shared_ptr<const Entry> entry_ptr_type;
-
   typedef Key key_type;
-  typedef T   mapped_type;
+  typedef T mapped_type;
   typedef std::pair<Key, T> value_type;
 
-  struct Entry {
+  class Entry {
+   public:
     Entry(const key_type& key, const mapped_type& value) :
       key(key),
-      value(value)
+      value(value),
+      refcount_(1)
     {}
 
+    inline void get() const {
+      assert(refcount_ > 0);
+      refcount_++;
+    }
+
+    inline void put() const {
+      assert(refcount_ > 0);
+      if (refcount_.fetch_sub(1) == 1) {
+        delete this;
+      }
+    }
+
+   public:
     const key_type key;
     const mapped_type value;
+
+   private:
+    mutable std::atomic<uint64_t> refcount_;
   };
 
   // even though everything is const, and copied instead of mutated do we ever
@@ -46,10 +62,70 @@ class Tree {
   //
   // in som einstances like insert, we could relax copy-only and mutate to save
   // some cycles.
-  struct Node {
+  class Node {
+   private:
+    // caller ensures correct reference counts
+    static inline const Node * _makeNode(const OpContext& ctx, const bool red,
+        const Entry * const entry, const Node * const left,
+        const Node * const right) {
+      return new Node(red, entry, left, right, ctx.rid);
+    }
+
+    // bumps all reference counts
+    static inline const Node * makeNode(const OpContext& ctx, const bool red,
+        const Entry * const entry,
+        const Node * const left,
+        const Node * const right) {
+      if (left)
+        left->get();
+
+      if (right)
+        right->get();
+
+      assert(entry);
+      entry->get();
+
+      return _makeNode(ctx, red, entry, left, right);
+    }
+
+    // caller ensure correct left/right reference counts
+    static inline auto makeNodeWithEntry(const OpContext& ctx, const bool red,
+        const key_type& key, const mapped_type& value,
+        const Node * const left, const Node * const right) {
+      const auto entry = new Entry(key, value);
+      return _makeNode(ctx, red, entry, left, right);
+    }
+
+   private:
+    inline auto copyWithEntry(const OpContext& ctx, const key_type& key,
+        const mapped_type& value) const {
+      return makeNodeWithEntry(ctx, red, key, value, get(left), get(right));
+    }
+
+    // steals new_left reference
+    inline auto __copyWithLeft(const OpContext& ctx,
+        const Node * const new_left) const {
+      return _makeNode(ctx, red, get(entry), new_left, get(right));
+    }
+
+    // steals new_right reference
+    inline auto __copyWithRight(const OpContext& ctx,
+        const Node * const new_right) const {
+      return _makeNode(ctx, red, get(entry), get(left), new_right);
+    }
+
+    inline auto copyAsRed(const OpContext& ctx) const {
+      return makeNode(ctx, true, entry, left, right);
+    }
+
    public:
+    inline auto copyAsBlack(const OpContext& ctx) const {
+      return makeNode(ctx, false, entry, left, right);
+    }
+
+   private:
     Node(const bool red,
-        const entry_ptr_type& entry,
+        const Entry * const entry,
         const Node * const left,
         const Node * const right,
         const uint64_t rid) :
@@ -61,54 +137,39 @@ class Tree {
       refcount_(1)
     {}
 
-    static inline const Node * __makeNode(const OpContext& ctx, const bool red,
-        const entry_ptr_type& entry, const Node * const left,
-        const Node * const right) {
-      return new Node(red, entry, left, right, ctx.rid);
-    }
-
-    static inline const Node * makeNode(const OpContext& ctx, const bool red,
-        const entry_ptr_type& entry, const Node * const left,
-        const Node * const right)
-    {
-      if (left)
-        left->get();
-
-      if (right)
-        right->get();
-
-      return __makeNode(ctx, red, entry, left, right);
-    }
-
-    static inline auto makeNode(const OpContext& ctx, const bool red,
-        const key_type& key, const mapped_type& value,
-        const Node * const left, const Node * const right) {
-      const auto entry = std::make_shared<const Entry>(key, value);
-      return makeNode(ctx, red, entry, left, right);
-    }
+    Node(const Node& other) = delete;
+    Node(Node&& other) = delete;
+    Node& operator=(const Node& other) = delete;
+    Node& operator=(Node&& other) = delete;
+    ~Node() = default;
 
    public:
-    inline auto copyWithEntry(const OpContext& ctx, const key_type& key,
-        const mapped_type& value) const {
-      return makeNode(ctx, red, key, value, left, right);
+    inline void get() const {
+      assert(refcount_ > 0);
+      refcount_++;
     }
 
-    inline auto __copyWithLeft(const OpContext& ctx,
-        const Node * const new_left) const {
-      return __makeNode(ctx, red, entry, new_left, get(right));
+    inline void put() const {
+      assert(refcount_ > 0);
+      if (refcount_.fetch_sub(1) == 1) {
+        if (left)
+          left->put();
+        if (right)
+          right->put();
+        assert(entry);
+        entry->put();
+        delete this;
+      }
     }
 
-    inline auto __copyWithRight(const OpContext& ctx,
-        const Node * const new_right) const {
-      return __makeNode(ctx, red, entry, get(left), new_right);
-    }
-
-    inline auto copyAsBlack(const OpContext& ctx) const {
-      return makeNode(ctx, false, entry, left, right);
-    }
-
-    inline auto copyAsRed(const OpContext& ctx) const {
-      return makeNode(ctx, true, entry, left, right);
+   private:
+    // helper to bump reference count
+    template<typename RT>
+    static inline auto get(RT item) {
+      if (item) {
+        item->get();
+      }
+      return item;
     }
 
    public:
@@ -143,104 +204,25 @@ class Tree {
           return std::make_pair(new_node, false);
         }
       } else {
-        const auto new_node = makeNode(ctx, true, key, value, nullptr, nullptr);
+        const auto new_node = makeNodeWithEntry(ctx, true, key, value, nullptr, nullptr);
         return std::make_pair(new_node, true);
       }
     }
 
-    const Node * balance(const OpContext& ctx) const {
-      if (!red) {
-        // match: (color_l, color_l_l, color_l_r, color_r, color_r_l, color_r_r)
-        if (left && left->red) {
-          // case: (Some(R), Some(R), ..)
-          if (left->left && left->left->red) {
-            const auto new_left = makeNode(ctx,
-                false,
-                left->left->entry,
-                left->left->left,
-                left->left->right);
-
-            const auto new_right = makeNode(ctx,
-                false,
-                entry,
-                left->right,
-                right);
-
-            return __makeNode(ctx,
-                true,
-                left->entry,
-                new_left,
-                new_right);
-
-            // case: (Some(R), _, Some(R), ..)
-          } else if (left->right && left->right->red) {
-            const auto new_left = makeNode(ctx,
-                false,
-                left->entry,
-                left->left,
-                left->right->left);
-
-            const auto new_right = makeNode(ctx,
-                false,
-                entry,
-                left->right->right,
-                right);
-
-            return __makeNode(ctx,
-                true,
-                left->right->entry,
-                new_left,
-                new_right);
-          }
+    static std::pair<const Node *, bool> remove(const OpContext& ctx,
+        const Node * const node, const key_type& key) {
+      if (node) {
+        if (key < node->entry->key) {
+          return remove_left(ctx, node, key);
+        } else if (key > node->entry->key) {
+          return remove_right(ctx, node, key);
+        } else {
+          const auto new_node = fuse(ctx, node->left, node->right);
+          return std::make_pair(new_node, true);
         }
-
-        // case: (.., Some(R), Some(R), _)
-        if (right && right->red) {
-          if (right->left && right->left->red) {
-            const auto new_left = makeNode(ctx,
-                false,
-                entry,
-                left,
-                right->left->left);
-
-            const auto new_right = makeNode(ctx,
-                false,
-                right->entry,
-                right->left->right,
-                right->right);
-
-            return __makeNode(ctx,
-                true,
-                right->left->entry,
-                new_left,
-                new_right);
-
-            // case: (.., Some(R), _, Some(R))
-          } else if (right->right && right->right->red) {
-            const auto new_left = makeNode(ctx,
-                false,
-                entry,
-                left,
-                right->left);
-
-            const auto new_right = makeNode(ctx,
-                false,
-                right->right->entry,
-                right->right->left,
-                right->right->right);
-
-            return __makeNode(ctx,
-                true,
-                right->entry,
-                new_left,
-                new_right);
-          }
-        }
+      } else {
+        return std::make_pair(nullptr, false);
       }
-
-      // red, or no matching case above
-      get();
-      return this;
     }
 
     // check that all nodes in the tree with the given rid are accessible via a
@@ -295,15 +277,104 @@ class Tree {
       return 0; // LCOV_EXCL_LINE
     }
 
-    static inline auto get(const Node * const node) {
-      if (node) {
-        node->get();
+   private:
+    const Node * balance(const OpContext& ctx) const {
+      if (!red) {
+        // match: (color_l, color_l_l, color_l_r, color_r, color_r_l, color_r_r)
+        if (left && left->red) {
+          // case: (Some(R), Some(R), ..)
+          if (left->left && left->left->red) {
+            const auto new_left = makeNode(ctx,
+                false,
+                left->left->entry,
+                left->left->left,
+                left->left->right);
+
+            const auto new_right = makeNode(ctx,
+                false,
+                entry,
+                left->right,
+                right);
+
+            return _makeNode(ctx,
+                true,
+                get(left->entry),
+                new_left,
+                new_right);
+
+            // case: (Some(R), _, Some(R), ..)
+          } else if (left->right && left->right->red) {
+            const auto new_left = makeNode(ctx,
+                false,
+                left->entry,
+                left->left,
+                left->right->left);
+
+            const auto new_right = makeNode(ctx,
+                false,
+                entry,
+                left->right->right,
+                right);
+
+            return _makeNode(ctx,
+                true,
+                get(left->right->entry),
+                new_left,
+                new_right);
+          }
+        }
+
+        // case: (.., Some(R), Some(R), _)
+        if (right && right->red) {
+          if (right->left && right->left->red) {
+            const auto new_left = makeNode(ctx,
+                false,
+                entry,
+                left,
+                right->left->left);
+
+            const auto new_right = makeNode(ctx,
+                false,
+                right->entry,
+                right->left->right,
+                right->right);
+
+            return _makeNode(ctx,
+                true,
+                get(right->left->entry),
+                new_left,
+                new_right);
+
+            // case: (.., Some(R), _, Some(R))
+          } else if (right->right && right->right->red) {
+            const auto new_left = makeNode(ctx,
+                false,
+                entry,
+                left,
+                right->left);
+
+            const auto new_right = makeNode(ctx,
+                false,
+                right->right->entry,
+                right->right->left,
+                right->right->right);
+
+            return _makeNode(ctx,
+                true,
+                get(right->entry),
+                new_left,
+                new_right);
+          }
+        }
       }
-      return node;
+
+      // red, or no matching case above
+      get();
+      return this;
     }
 
     // remove
-   public:
+   private:
     static const Node * fuse(const OpContext& ctx,
         const Node * const left,
         const Node * const right) {
@@ -322,17 +393,17 @@ class Tree {
       // match: (left.color, right.color)
       // case: (B, R)
       if (!left->red && right->red) {
-        return __makeNode(ctx,
+        return _makeNode(ctx,
             true,
-            right->entry,
+            get(right->entry),
             fuse(ctx, left, right->left),
             get(right->right));
 
         // case: (R, B)
       } else if (left->red && !right->red) {
-        return __makeNode(ctx,
+        return _makeNode(ctx,
             true,
-            left->entry,
+            get(left->entry),
             get(left->left),
             fuse(ctx, left->right, right));
 
@@ -352,9 +423,9 @@ class Tree {
               fused->right,
               right->right);
 
-          const auto new_node = __makeNode(ctx,
+          const auto new_node = _makeNode(ctx,
               true,
-              fused->entry,
+              get(fused->entry),
               new_left,
               new_right);
 
@@ -362,15 +433,15 @@ class Tree {
           return new_node;
         }
 
-        const auto new_right = __makeNode(ctx,
+        const auto new_right = _makeNode(ctx,
             true,
-            right->entry,
+            get(right->entry),
             fused,
             get(right->right));
 
-        return __makeNode(ctx,
+        return _makeNode(ctx,
             true,
-            left->entry,
+            get(left->entry),
             get(left->left),
             new_right);
 
@@ -390,9 +461,9 @@ class Tree {
               fused->right,
               right->right);
 
-          const auto new_node = __makeNode(ctx,
+          const auto new_node = _makeNode(ctx,
               true,
-              fused->entry,
+              get(fused->entry),
               new_left,
               new_right);
 
@@ -400,15 +471,15 @@ class Tree {
           return new_node;
         }
 
-        const auto new_right = __makeNode(ctx,
+        const auto new_right = _makeNode(ctx,
             false,
-            right->entry,
+            get(right->entry),
             fused,
             get(right->right));
 
-        const auto new_node = __makeNode(ctx,
+        const auto new_node = _makeNode(ctx,
             true,
-            left->entry,
+            get(left->entry),
             get(left->left),
             new_right);
 
@@ -431,9 +502,9 @@ class Tree {
         const auto new_right = node->right ?
           node->right->copyAsBlack(ctx) : nullptr;
 
-        return __makeNode(ctx,
+        return _makeNode(ctx,
             true,
-            node->entry,
+            get(node->entry),
             new_left,
             new_right);
       }
@@ -452,9 +523,9 @@ class Tree {
             node->left->left,
             node->left->right);
 
-        return __makeNode(ctx,
+        return _makeNode(ctx,
             true,
-            node->entry,
+            get(node->entry),
             new_left,
             get(node->right));
 
@@ -466,9 +537,9 @@ class Tree {
             node->right->left,
             node->right->right);
 
-        const auto new_node = __makeNode(ctx,
+        const auto new_node = _makeNode(ctx,
             false,
-            node->entry,
+            get(node->entry),
             get(node->left),
             new_right);
 
@@ -481,9 +552,9 @@ class Tree {
       } else if (node->right && node->right->red &&
           node->right->left && !node->right->left->red) {
 
-        const auto unbalanced_new_right = __makeNode(ctx,
+        const auto unbalanced_new_right = _makeNode(ctx,
             false,
-            node->right->entry,
+            get(node->right->entry),
             get(node->right->left->right),
             node->right->right->copyAsRed(ctx));
 
@@ -496,9 +567,9 @@ class Tree {
             node->left,
             node->right->left->left);
 
-        return __makeNode(ctx,
+        return _makeNode(ctx,
             true,
-            node->right->left->entry,
+            get(node->right->left->entry),
             new_left,
             new_right);
       }
@@ -517,9 +588,9 @@ class Tree {
             node->right->left,
             node->right->right);
 
-        return __makeNode(ctx,
+        return _makeNode(ctx,
             true,
-            node->entry,
+            get(node->entry),
             get(node->left),
             new_right);
 
@@ -531,9 +602,9 @@ class Tree {
             node->left->left,
             node->left->right);
 
-        const auto new_node = __makeNode(ctx,
+        const auto new_node = _makeNode(ctx,
             false,
-            node->entry,
+            get(node->entry),
             new_left,
             get(node->right));
 
@@ -546,9 +617,9 @@ class Tree {
       } else if (node->left && node->left->red &&
           node->left->right && !node->left->right->red) {
 
-        const auto unbalanced_new_left = __makeNode(ctx,
+        const auto unbalanced_new_left = _makeNode(ctx,
             false,
-            node->left->entry,
+            get(node->left->entry),
             node->left->left->copyAsRed(ctx),
             get(node->left->right->left));
 
@@ -561,9 +632,9 @@ class Tree {
             node->left->right->right,
             node->right);
 
-        return __makeNode(ctx,
+        return _makeNode(ctx,
             true,
-            node->left->right->entry,
+            get(node->left->right->entry),
             new_left,
             new_right);
       }
@@ -575,9 +646,9 @@ class Tree {
         const Node * const node, const key_type& key) {
       const auto [new_left, removed] = remove(ctx, node->left, key);
 
-      const auto new_node = __makeNode(ctx,
+      const auto new_node = _makeNode(ctx,
           true, // In case of rebalance the color does not matter
-          node->entry,
+          get(node->entry),
           new_left,
           get(node->right));
 
@@ -595,9 +666,9 @@ class Tree {
         const Node * const node, const key_type& key) {
       const auto [new_right, removed] = remove(ctx, node->right, key);
 
-      const auto new_node = __makeNode(ctx,
+      const auto new_node = _makeNode(ctx,
           true, // In case of rebalance the color does not matter
-          node->entry,
+          get(node->entry),
           get(node->left),
           new_right);
 
@@ -611,40 +682,9 @@ class Tree {
       }
     }
 
-    static std::pair<const Node *, bool> remove(const OpContext& ctx,
-        const Node * const node, const key_type& key) {
-      if (node) {
-        if (key < node->entry->key) {
-          return remove_left(ctx, node, key);
-        } else if (key > node->entry->key) {
-          return remove_right(ctx, node, key);
-        } else {
-          const auto new_node = fuse(ctx, node->left, node->right);
-          return std::make_pair(new_node, true);
-        }
-      } else {
-        return std::make_pair(nullptr, false);
-      }
-    }
-
-    inline void get() const {
-      assert(refcount_);
-      refcount_++;
-    }
-
-    inline void put() const {
-      if (refcount_.fetch_sub(1) == 1) {
-        if (left)
-          left->put();
-        if (right)
-          right->put();
-        delete this;
-      }
-    }
-
    public:
     const bool red;
-    const entry_ptr_type entry;
+    const Entry * const entry;
     const Node * const left;
     const Node * const right;
     const uint64_t rid;
