@@ -8,7 +8,7 @@
 #include "ptree.h"
 
 struct tree_pair {
-  Tree<std::string, std::string> tree;
+  Tree tree;
   std::map<std::string, std::string> truth;
 };
 
@@ -32,7 +32,7 @@ TEST(Foo, Bar) {
   std::list<tree_pair> trees;
 
   // on-going state
-  Tree<std::string, std::string> tree;
+  Tree tree;
   std::map<std::string, std::string> truth;
 
   uint64_t rid = 0;

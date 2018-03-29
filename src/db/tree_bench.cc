@@ -16,7 +16,10 @@ struct rng {
 
   inline auto next() {
     std::lock_guard<std::mutex> lk(lock);
-    return dis(gen);
+    auto key = dis(gen);
+    std::stringstream ss;
+    ss << std::setw(20) << std::setfill('0') << key;
+    return ss.str();
   }
 
   std::random_device rd;
@@ -29,16 +32,16 @@ static std::atomic<uint64_t> rid = 0;
 
 static auto buildTree(rng& r, std::size_t size)
 {
-  Tree<uint64_t, uint64_t> tree;
+  Tree tree;
   while (tree.size() < size) {
     OpContext ctx = { rid++ };
-    const uint64_t key = r.next();
+    const std::string key = r.next();
     tree = tree.insert(ctx, key, key);
   }
   return tree;
 }
 
-static Tree<uint64_t, uint64_t> tree;
+static Tree tree;
 
 static std::condition_variable cond;
 static bool init_complete = false;
@@ -73,7 +76,7 @@ static void BM_Insert(benchmark::State& state)
   assert(tree.size() == (unsigned)tree_size);
 
   // generate set of keys to insert
-  std::vector<uint64_t> keys;
+  std::vector<std::string> keys;
   keys.reserve(num_inserts);
   while (keys.size() < (unsigned)num_inserts) {
     const auto key = r.next();
