@@ -29,11 +29,14 @@ static std::atomic<uint64_t> rid = 0;
 
 static auto buildTree(rng& r, std::size_t size)
 {
+  Tree<uint64_t, uint64_t>::OpContext ctx;
+
   Tree<uint64_t, uint64_t> tree;
   while (tree.size() < size) {
-    OpContext ctx = { rid++ };
+    ctx.rid = rid++;
     const uint64_t key = r.next();
-    tree = tree.insert(ctx, key, key);
+    auto t = tree.insert(ctx, key, key);
+    tree.assign(ctx, std::move(t));
   }
   return tree;
 }
@@ -50,13 +53,16 @@ static void BM_Insert(benchmark::State& state)
   const int num_inserts = state.range(1);
   rng r;
 
+  Tree<uint64_t, uint64_t>::OpContext ctx;
+
   if (state.thread_index == 0) {
     std::lock_guard<std::mutex> lk(lock);
 
     // build the shared tree
     if (tree.size() != (unsigned)tree_size) {
       tree.clear();
-      tree = buildTree(r, tree_size);
+      auto t = buildTree(r, tree_size);
+      tree.assign(ctx, std::move(t));
     }
 
     // notify build is complete
@@ -84,8 +90,10 @@ static void BM_Insert(benchmark::State& state)
 
   for (auto _ : state) {
     for (const auto& key : keys) {
-      OpContext ctx = { rid++ };
-      benchmark::DoNotOptimize(tree.insert(ctx, key, key));
+      ctx.rid = rid++;
+      //benchmark::DoNotOptimize(tree.insert(ctx, key, key));
+      auto t = tree.insert(ctx, key, key);
+      t.clear(&ctx);
     }
   }
 
@@ -95,12 +103,14 @@ static void BM_Insert(benchmark::State& state)
     // tree is cleared when the size changes in the initialization phase. Note
     // that if there are more benchmarks in this executable, we might want to
     // figure out a way to clear the tree after the very last run.
+    std::cout << a << " " << b << std::endl;
   }
+
 }
 
 BENCHMARK(BM_Insert)
   ->RangeMultiplier(10)
-  ->Ranges({{100000, 100000}, {100000, 100000}})
-  ->ThreadRange(1, 1);
+  ->Ranges({{100000, 100000}, {200000, 200000}})
+  ->ThreadRange(2, 2);
 
 BENCHMARK_MAIN();

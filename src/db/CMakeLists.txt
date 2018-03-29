@@ -31,5 +31,8 @@ target_link_libraries(cruzdb_test_ptree
   gtest_main)
 install(TARGETS cruzdb_test_ptree DESTINATION bin)
 
+add_executable(ptree2 ptree_test2.cc)
+install(TARGETS ptree2 DESTINATION bin)
+
 add_executable(tree_bench tree_bench.cc)
 target_link_libraries(tree_bench benchmark)

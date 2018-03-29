@@ -36,27 +36,30 @@ TEST(Foo, Bar) {
   std::map<std::string, std::string> truth;
 
   uint64_t rid = 0;
+  Tree<std::string, std::string>::OpContext ctx;
 
   // build a bunch of snapshots
-  for (int i = 0; i < 500; i++) {
+  for (int i = 0; i < 100; i++) {
     for (int j = 0; j < 50; j++) {
-      OpContext ctx = { rid++ };
+      ctx.rid = rid++;
       auto op_count = ops(gen);
       // FIXME: do until op_count SUCCESSFUL ops
       while (op_count) {
         const std::string key = tostr(dis(gen));
         if (coin(gen) < coin_toss) {
-          tree = tree.insert(ctx, key, key);
+          auto new_tree = tree.insert(ctx, key, key);
+          tree.assign(ctx, std::move(new_tree));
           truth.emplace(key, key);
         } else {
-          tree = tree.remove(ctx, key);
+          auto new_tree = tree.remove(ctx, key);
+          tree.assign(ctx, std::move(new_tree));
           truth.erase(key);
         }
         op_count--;
       }
     }
     trees.emplace_back();
-    trees.back().tree = tree;
+    trees.back().tree.assign(ctx, std::move(tree));
     trees.back().truth = truth;
   }
 

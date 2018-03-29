@@ -6,21 +6,23 @@
 #include <atomic>
 #include <map>
 #include <cassert>
-#include <memory>
 #include <stack>
 #include <string>
 #include <utility>
 #include <cstddef>
+#include <boost/intrusive/list.hpp>
 #include <boost/optional.hpp>
 
-struct OpContext {
-  const uint64_t rid;
-};
+static int a = 0;
+static int b = 0;
 
 template<
   typename Key,
   typename T>
 class Tree {
+ public:
+//  struct OpContext;
+
  private:
   struct Node;
   struct Entry;
@@ -63,16 +65,55 @@ class Tree {
   // in som einstances like insert, we could relax copy-only and mutate to save
   // some cycles.
   class Node {
+   public:
+    mutable boost::intrusive::list_member_hook<> bi_hook;
+
+    typedef boost::intrusive::member_hook<Node,
+            boost::intrusive::list_member_hook<>,
+            &Node::bi_hook> NodeHook;
+
+    typedef boost::intrusive::list<Node, NodeHook> NodeList;
+
+    struct OpContext {
+      uint64_t rid;
+      NodeList free_nodes;
+
+      ~OpContext() {
+        while (!free_nodes.empty()) {
+          auto& n = free_nodes.front();
+          free_nodes.pop_front();
+          delete &n;
+        }
+      }
+    };
+
+    // TODO: add entry object cache
+    // TODO: use an slist
+
    private:
     // caller ensures correct reference counts
-    static inline const Node * _makeNode(const OpContext& ctx, const bool red,
+    static inline const Node * _makeNode(OpContext& ctx, const bool red,
         const Entry * const entry, const Node * const left,
         const Node * const right) {
+#if 1
+      if (ctx.free_nodes.empty()) {
+        const auto node = new Node(red, entry, left, right, ctx.rid);
+        a++;
+        return node;
+      } else {
+        auto& n = ctx.free_nodes.front();
+        ctx.free_nodes.pop_front();
+        const auto node = new (&n) Node(red, entry, left, right, ctx.rid);
+        b++;
+        return node;
+      }
+#else
       return new Node(red, entry, left, right, ctx.rid);
+#endif
     }
 
     // bumps all reference counts
-    static inline const Node * makeNode(const OpContext& ctx, const bool red,
+    static inline const Node * makeNode(OpContext& ctx, const bool red,
         const Entry * const entry,
         const Node * const left,
         const Node * const right) {
@@ -89,7 +130,7 @@ class Tree {
     }
 
     // caller ensure correct left/right reference counts
-    static inline auto makeNodeWithEntry(const OpContext& ctx, const bool red,
+    static inline auto makeNodeWithEntry(OpContext& ctx, const bool red,
         const key_type& key, const mapped_type& value,
         const Node * const left, const Node * const right) {
       const auto entry = new Entry(key, value);
@@ -97,29 +138,29 @@ class Tree {
     }
 
    private:
-    inline auto copyWithEntry(const OpContext& ctx, const key_type& key,
+    inline auto copyWithEntry(OpContext& ctx, const key_type& key,
         const mapped_type& value) const {
       return makeNodeWithEntry(ctx, red, key, value, get(left), get(right));
     }
 
     // steals new_left reference
-    inline auto __copyWithLeft(const OpContext& ctx,
+    inline auto __copyWithLeft(OpContext& ctx,
         const Node * const new_left) const {
       return _makeNode(ctx, red, get(entry), new_left, get(right));
     }
 
     // steals new_right reference
-    inline auto __copyWithRight(const OpContext& ctx,
+    inline auto __copyWithRight(OpContext& ctx,
         const Node * const new_right) const {
       return _makeNode(ctx, red, get(entry), get(left), new_right);
     }
 
-    inline auto copyAsRed(const OpContext& ctx) const {
+    inline auto copyAsRed(OpContext& ctx) const {
       return makeNode(ctx, true, entry, left, right);
     }
 
    public:
-    inline auto copyAsBlack(const OpContext& ctx) const {
+    inline auto copyAsBlack(OpContext& ctx) const {
       return makeNode(ctx, false, entry, left, right);
     }
 
@@ -149,16 +190,33 @@ class Tree {
       refcount_++;
     }
 
-    inline void put() const {
+    inline void put(OpContext *ctx) const {
       assert(refcount_ > 0);
       if (refcount_.fetch_sub(1) == 1) {
         if (left)
-          left->put();
+          left->put(ctx);
         if (right)
-          right->put();
+          right->put(ctx);
         assert(entry);
         entry->put();
+#if 1
+        if (ctx) {
+          // TODO: the const correctness here may not really matter in the long
+          // run because when we add the ability to slice of parts of the tree
+          // for space management, i suspect we'll need to strip a lot of the
+          // const qualifier out anyway!
+          //
+          // Casting away const-ness here is probably undefined behavior. We
+          // need a better method for dealing with this...
+          //Node& node = (Node&)*this;
+          //ctx->free_nodes.push_back(node);
+          ctx->free_nodes.push_back(const_cast<Node&>(*this));
+        } else {
+          delete this;
+        }
+#else
         delete this;
+#endif
       }
     }
 
@@ -173,7 +231,7 @@ class Tree {
     }
 
    public:
-    static std::pair<const Node *, bool> insert(const OpContext& ctx,
+    static std::pair<const Node *, bool> insert(OpContext& ctx,
         const Node * const node, const key_type& key,
         const mapped_type& value) {
       if (node) {
@@ -182,7 +240,7 @@ class Tree {
           const auto new_node = node->__copyWithLeft(ctx, new_left); // steals new_left ref
           if (is_new_key) {
             const auto balanced = new_node->balance(ctx);
-            new_node->put();
+            new_node->put(&ctx);
             return std::make_pair(balanced, is_new_key);
           } else {
             return std::make_pair(new_node, is_new_key);
@@ -193,7 +251,7 @@ class Tree {
           const auto new_node = node->__copyWithRight(ctx, new_right); // steals new_right ref
           if (is_new_key) {
             const auto balanced = new_node->balance(ctx);
-            new_node->put();
+            new_node->put(&ctx);
             return std::make_pair(balanced, is_new_key);
           } else {
             return std::make_pair(new_node, is_new_key);
@@ -209,7 +267,7 @@ class Tree {
       }
     }
 
-    static std::pair<const Node *, bool> remove(const OpContext& ctx,
+    static std::pair<const Node *, bool> remove(OpContext& ctx,
         const Node * const node, const key_type& key) {
       if (node) {
         if (key < node->entry->key) {
@@ -278,7 +336,7 @@ class Tree {
     }
 
    private:
-    const Node * balance(const OpContext& ctx) const {
+    const Node * balance(OpContext& ctx) const {
       if (!red) {
         // match: (color_l, color_l_l, color_l_r, color_r, color_r_l, color_r_r)
         if (left && left->red) {
@@ -375,7 +433,7 @@ class Tree {
 
     // remove
    private:
-    static const Node * fuse(const OpContext& ctx,
+    static const Node * fuse(OpContext& ctx,
         const Node * const left,
         const Node * const right) {
       // match: (left, right)
@@ -429,7 +487,7 @@ class Tree {
               new_left,
               new_right);
 
-          fused->put();
+          fused->put(&ctx);
           return new_node;
         }
 
@@ -467,7 +525,7 @@ class Tree {
               new_left,
               new_right);
 
-          fused->put();
+          fused->put(&ctx);
           return new_node;
         }
 
@@ -485,14 +543,14 @@ class Tree {
 
         const auto balanced = balance_left(ctx, new_node);
 
-        new_node->put();
+        new_node->put(&ctx);
         return balanced;
       }
 
       assert(0); // LCOV_EXCL_LINE
     }
 
-    static const Node * balance(const OpContext& ctx, const Node * const node) {
+    static const Node * balance(OpContext& ctx, const Node * const node) {
       if (node->left && node->left->red &&
           node->right && node->right->red) {
 
@@ -513,7 +571,7 @@ class Tree {
       return node->balance(ctx);
     }
 
-    static const Node * balance_left(const OpContext& ctx, const Node * const node) {
+    static const Node * balance_left(OpContext& ctx, const Node * const node) {
       // match: (color_l, color_r, color_r_l)
       // case: (Some(R), ..)
       if (node->left && node->left->red) {
@@ -544,7 +602,7 @@ class Tree {
             new_right);
 
         const auto balanced = balance(ctx, new_node);
-        new_node->put();
+        new_node->put(&ctx);
 
         return balanced;
 
@@ -559,7 +617,7 @@ class Tree {
             node->right->right->copyAsRed(ctx));
 
         const auto new_right = balance(ctx, unbalanced_new_right);
-        unbalanced_new_right->put();
+        unbalanced_new_right->put(&ctx);
 
         const auto new_left = makeNode(ctx,
             false,
@@ -577,7 +635,7 @@ class Tree {
       assert(0); // LCOV_EXCL_LINE
     }
 
-    static const Node * balance_right(const OpContext& ctx,
+    static const Node * balance_right(OpContext& ctx,
         const Node * const node) {
       // match: (color_l, color_l_r, color_r)
       // case: (.., Some(R))
@@ -609,7 +667,7 @@ class Tree {
             get(node->right));
 
         const auto balanced = balance(ctx, new_node);
-        new_node->put();
+        new_node->put(&ctx);
 
         return balanced;
 
@@ -624,7 +682,7 @@ class Tree {
             get(node->left->right->left));
 
         const auto new_left = balance(ctx, unbalanced_new_left);
-        unbalanced_new_left->put();
+        unbalanced_new_left->put(&ctx);
 
         const auto new_right = makeNode(ctx,
             false,
@@ -642,7 +700,7 @@ class Tree {
       assert(0); // LCOV_EXCL_LINE
     }
 
-    static std::pair<const Node *, bool> remove_left(const OpContext& ctx,
+    static std::pair<const Node *, bool> remove_left(OpContext& ctx,
         const Node * const node, const key_type& key) {
       const auto [new_left, removed] = remove(ctx, node->left, key);
 
@@ -655,14 +713,14 @@ class Tree {
       const bool left_black = node->left && !node->left->red;
       if (left_black) {
         const auto balanced_new_node = balance_left(ctx, new_node);
-        new_node->put();
+        new_node->put(&ctx);
         return std::make_pair(balanced_new_node, removed);
       } else {
         return std::make_pair(new_node, removed);
       }
     }
 
-    static std::pair<const Node *, bool> remove_right(const OpContext& ctx,
+    static std::pair<const Node *, bool> remove_right(OpContext& ctx,
         const Node * const node, const key_type& key) {
       const auto [new_right, removed] = remove(ctx, node->right, key);
 
@@ -675,7 +733,7 @@ class Tree {
       const bool right_black = node->right && !node->right->red;
       if (right_black) {
         const auto balanced_new_node = balance_right(ctx, new_node);
-        new_node->put();
+        new_node->put(&ctx);
         return std::make_pair(balanced_new_node, removed);
       } else {
         return std::make_pair(new_node, removed);
@@ -692,6 +750,9 @@ class Tree {
    private:
     mutable std::atomic<uint64_t> refcount_;
   };
+
+ public:
+  using OpContext = typename Node::OpContext;
 
  public:
   Tree() :
@@ -717,9 +778,10 @@ class Tree {
 
   ~Tree() {
     if (root_)
-      root_->put();
+      root_->put(nullptr);
   }
 
+#if 0
   Tree& operator=(const Tree& other) {
     if (root_)
       root_->put();
@@ -739,6 +801,24 @@ class Tree {
     other.size_ = 0;
     return *this;
   }
+#endif
+  void assign(OpContext& ctx, const Tree& other) {
+    if (root_)
+      root_->put(&ctx);
+    root_ = other.root_;
+    size_ = other.size_;
+    if (root_)
+      root_->get();
+  }
+
+  void assign(OpContext& ctx, Tree&& other) {
+    if (root_)
+      root_->put(&ctx);
+    root_ = other.root_;
+    size_ = other.size_;
+    other.root_ = nullptr;
+    other.size_ = 0;
+  }
 
  private:
   Tree(const Node *root, std::size_t size) :
@@ -746,28 +826,28 @@ class Tree {
   {}
 
  public:
-  Tree insert(const OpContext& ctx, const key_type& key,
+  Tree insert(OpContext& ctx, const key_type& key,
       const mapped_type& value) const {
     const auto [mb_new_root, is_new_key] = Node::insert(ctx, root_, key, value);
     const auto new_root = mb_new_root->copyAsBlack(ctx); // mb = maybe black
-    mb_new_root->put();
+    mb_new_root->put(&ctx);
     const auto new_size = size_ + (is_new_key ? 1 : 0);
     return Tree(new_root, new_size);
   }
 
-  Tree remove(const OpContext& ctx, const key_type& key) const {
+  Tree remove(OpContext& ctx, const key_type& key) const {
     const auto [mb_new_root, removed] = Node::remove(ctx, root_, key);
     if (removed) {
       if (mb_new_root) {
         const auto new_root = mb_new_root->copyAsBlack(ctx);
-        mb_new_root->put();
+        mb_new_root->put(&ctx);
         return Tree(new_root, size_ - 1);
       } else {
         return Tree(nullptr, size_ - 1);
       }
     } else {
       if (mb_new_root)
-        mb_new_root->put();
+        mb_new_root->put(&ctx);
       return *this; // copy constructor takes reference
     }
   }
@@ -808,9 +888,9 @@ class Tree {
     return size_;
   }
 
-  void clear() {
+  void clear(OpContext *ctx = nullptr) {
     if (root_)
-      root_->put();
+      root_->put(ctx);
     root_ = nullptr;
     size_ = 0;
   }
