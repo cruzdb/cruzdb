@@ -45,6 +45,28 @@ class Entry {
   mutable std::atomic<uint64_t> refcount_;
 };
 
+class Node;
+
+class NodePointer {
+ public:
+  NodePointer() :
+    ptr_(nullptr)
+  {}
+
+  NodePointer(const Node *ptr) :
+    ptr_(ptr)
+  {}
+
+  auto operator()() const {
+    return ptr_;
+  }
+
+  NodePointer copy() const;
+
+ private:
+  const Node *ptr_;
+};
+
 // even though everything is const, and copied instead of mutated do we ever
 // need any memory barriers or enforcement of certain consistency?
 //
@@ -62,21 +84,28 @@ class Node {
 
   // caller ensures correct reference counts
   static inline const Node * _makeNode(const OpContext& ctx, const bool red,
-      const Entry * const entry, const Node * const left,
-      const Node * const right) {
+      const Entry * const entry,
+      const NodePointer& left,
+      const NodePointer& right) {
     return new Node(red, entry, left, right, ctx.rid);
   }
 
   // bumps all reference counts
   static inline const Node * makeNode(const OpContext& ctx, const bool red,
       const Entry * const entry,
-      const Node * const left,
-      const Node * const right) {
-    if (left)
-      left->get();
+      const NodePointer& left,
+      const NodePointer& right) {
 
-    if (right)
-      right->get();
+    // bumping the reference on the underlying node, if it exists. this could
+    // also be done in a copy constructor automatically, but that's later when
+    // all the cases have been working through explicitly.
+    if (auto lp = left(); lp) {
+      lp->get();
+    }
+
+    if (auto rp = right(); rp) {
+      rp->get();
+    }
 
     assert(entry);
     entry->get();
@@ -87,7 +116,7 @@ class Node {
   // caller ensure correct left/right reference counts
   static inline auto makeNodeWithEntry(const OpContext& ctx, const bool red,
       const std::string& key, const std::string& value,
-      const Node * const left, const Node * const right) {
+      const NodePointer& left, const NodePointer& right) {
     const auto entry = new Entry(key, value);
     return _makeNode(ctx, red, entry, left, right);
   }
@@ -95,19 +124,24 @@ class Node {
  private:
   inline auto copyWithEntry(const OpContext& ctx, const std::string& key,
       const std::string& value) const {
-    return makeNodeWithEntry(ctx, red, key, value, get(left), get(right));
+    // copies of left and right are made. the original left/right might be
+    // modified by a gc so we need ot makre the point where this thread takes
+    // ownership of a copy which no gc can get to. actually maybe that isn't an
+    // issue because the gc thread doesn't bother with ref counts. so if we make
+    // bump the reference and then grab a copy, and then its gcd that's fine.
+    return makeNodeWithEntry(ctx, red, key, value, left.copy(), right.copy());
   }
 
   // steals new_left reference
   inline auto __copyWithLeft(const OpContext& ctx,
       const Node * const new_left) const {
-    return _makeNode(ctx, red, get(entry), new_left, get(right));
+    return _makeNode(ctx, red, get(entry), new_left, right.copy());
   }
 
   // steals new_right reference
   inline auto __copyWithRight(const OpContext& ctx,
       const Node * const new_right) const {
-    return _makeNode(ctx, red, get(entry), get(left), new_right);
+    return _makeNode(ctx, red, get(entry), left.copy(), new_right);
   }
 
   inline auto copyAsRed(const OpContext& ctx) const {
@@ -122,8 +156,8 @@ class Node {
  private:
   Node(const bool red,
       const Entry * const entry,
-      const Node * const left,
-      const Node * const right,
+      const NodePointer& left,
+      const NodePointer& right,
       const uint64_t rid) :
     red(red),
     entry(entry),
@@ -148,10 +182,12 @@ class Node {
   inline void put() const {
     assert(refcount_ > 0);
     if (refcount_.fetch_sub(1) == 1) {
-      if (left)
-        left->put();
-      if (right)
-        right->put();
+      if (auto lp = left(); lp) {
+        lp->put();
+      }
+      if (auto rp = right(); rp) {
+        rp->put();
+      }
       assert(entry);
       entry->put();
       delete this;
@@ -160,9 +196,9 @@ class Node {
 
  public:
   static std::pair<const Node *, bool> insert(const OpContext& ctx,
-      const Node * const node, const std::string& key,
+      const NodePointer& root, const std::string& key,
       const std::string& value) {
-    if (node) {
+    if (auto node = root(); node) {
       if (key < node->entry->key) {
         const auto [new_left, is_new_key] = insert(ctx, node->left, key, value);
         const auto new_node = node->__copyWithLeft(ctx, new_left); // steals new_left ref
@@ -195,9 +231,9 @@ class Node {
     }
   }
 
-  static std::pair<const Node *, bool> remove(const OpContext& ctx,
-      const Node * const node, const std::string& key) {
-    if (node) {
+  static std::pair<NodePointer, bool> remove(const OpContext& ctx,
+      const NodePointer& root, const std::string& key) {
+    if (auto node = root(); node) {
       if (key < node->entry->key) {
         return remove_left(ctx, node, key);
       } else if (key > node->entry->key) {
@@ -213,8 +249,11 @@ class Node {
 
   // check that all nodes in the tree with the given rid are accessible via a
   // path from the root that is composed only of nodes with the same rid.
-  static bool checkDenseDelta(const Node * const node, const uint64_t rid,
+  static bool checkDenseDelta(const NodePointer& root, const uint64_t rid,
       const bool other_rid_above) {
+
+    auto node = root();
+
     if (!node) {
       return true;
     }
@@ -232,13 +271,15 @@ class Node {
   }
 
   // http://www.eternallyconfuzzled.com/tuts/datastructures/jsw_tut_rbtree.aspx
-  static std::size_t checkConsistency(const Node * const node) {
+  static std::size_t checkConsistency(const NodePointer& root) {
+    auto node = root();
+
     if (!node) {
       return 1;
     }
 
-    const auto left = node->left;
-    const auto right = node->right;
+    const auto left = node->left();
+    const auto right = node->right();
 
     if (node->red && ((left && left->red) || (right && right->red))) {
       return 0; // LCOV_EXCL_LINE
@@ -267,87 +308,87 @@ class Node {
   const Node * balance(const OpContext& ctx) const {
     if (!red) {
       // match: (color_l, color_l_l, color_l_r, color_r, color_r_l, color_r_r)
-      if (left && left->red) {
+      if (auto l_node = left(); l_node && l_node->red) {
         // case: (Some(R), Some(R), ..)
-        if (left->left && left->left->red) {
+        if (auto ll_node = l_node->left(); ll_node && ll_node->red) {
           const auto new_left = makeNode(ctx,
               false,
-              left->left->entry,
-              left->left->left,
-              left->left->right);
+              ll_node->entry,
+              ll_node->left,
+              ll_node->right);
 
           const auto new_right = makeNode(ctx,
               false,
               entry,
-              left->right,
+              l_node->right,
               right);
 
           return _makeNode(ctx,
               true,
-              get(left->entry),
+              get(l_node->entry),
               new_left,
               new_right);
 
           // case: (Some(R), _, Some(R), ..)
-        } else if (left->right && left->right->red) {
+        } else if (auto lr_node = l_node->right(); lr_node && lr_node->red) {
           const auto new_left = makeNode(ctx,
               false,
-              left->entry,
-              left->left,
-              left->right->left);
+              l_node->entry,
+              l_node->left,
+              lr_node->left);
 
           const auto new_right = makeNode(ctx,
               false,
               entry,
-              left->right->right,
+              lr_node->right,
               right);
 
           return _makeNode(ctx,
               true,
-              get(left->right->entry),
+              get(lr_node->entry),
               new_left,
               new_right);
         }
       }
 
       // case: (.., Some(R), Some(R), _)
-      if (right && right->red) {
-        if (right->left && right->left->red) {
+      if (auto r_node = right(); r_node && r_node->red) {
+        if (auto rl_node = r_node->left(); rl_node && rl_node->red) {
           const auto new_left = makeNode(ctx,
               false,
               entry,
               left,
-              right->left->left);
+              rl_node->left);
 
           const auto new_right = makeNode(ctx,
               false,
-              right->entry,
-              right->left->right,
-              right->right);
+              r_node->entry,
+              rl_node->right,
+              r_node->right);
 
           return _makeNode(ctx,
               true,
-              get(right->left->entry),
+              get(rl_node->entry),
               new_left,
               new_right);
 
           // case: (.., Some(R), _, Some(R))
-        } else if (right->right && right->right->red) {
+        } else if (auto rr_node = r_node->right(); rr_node && rr_node->red) {
           const auto new_left = makeNode(ctx,
               false,
               entry,
               left,
-              right->left);
+              r_node->left);
 
           const auto new_right = makeNode(ctx,
               false,
-              right->right->entry,
-              right->right->left,
-              right->right->right);
+              rr_node->entry,
+              rr_node->left,
+              rr_node->right);
 
           return _makeNode(ctx,
               true,
-              get(right->entry),
+              get(r_node->entry),
               new_left,
               new_right);
         }
@@ -361,112 +402,117 @@ class Node {
 
   // remove
  private:
-  static const Node * fuse(const OpContext& ctx,
-      const Node * const left,
-      const Node * const right) {
+  static const NodePointer fuse(const OpContext& ctx,
+      const NodePointer& left,
+      const NodePointer& right) {
     // match: (left, right)
     // case: (None, r)
-    if (!left) {
-      return get(right);
+    if (!left()) { // TODO: don't need to fully resolve to test
+      return right.copy();
       // case: (l, None)
-    } else if (!right) {
-      return get(left);
+    } else if (!right()) {
+      return left.copy(); // TODO: don't need to fully resolve to test
     }
     // case: (Some(l), Some(r))
     // fall through
-    assert(left && right);
+
+    auto l_node = left();
+    auto r_node = right();
+    assert(l_node && r_node);
 
     // match: (left.color, right.color)
     // case: (B, R)
-    if (!left->red && right->red) {
+    if (!l_node->red && r_node->red) {
       return _makeNode(ctx,
           true,
-          get(right->entry),
-          fuse(ctx, left, right->left),
-          get(right->right));
+          get(r_node->entry),
+          fuse(ctx, left, r_node->left),
+          r_node->right.copy());
 
       // case: (R, B)
-    } else if (left->red && !right->red) {
+    } else if (l_node->red && !r_node->red) {
       return _makeNode(ctx,
           true,
-          get(left->entry),
-          get(left->left),
-          fuse(ctx, left->right, right));
+          get(l_node->entry),
+          l_node->left.copy(),
+          fuse(ctx, l_node->right, right));
 
       // case: (R, R)
-    } else if (left->red && right->red) {
-      const auto fused = fuse(ctx, left->right, right->left);
-      if (fused && fused->red) {
+    } else if (l_node->red && r_node->red) {
+      const auto fused = fuse(ctx, l_node->right, r_node->left);
+      auto f_node = fused();
+      if (f_node && f_node->red) {
         const auto new_left = makeNode(ctx,
             true,
-            left->entry,
-            left->left,
-            fused->left);
+            l_node->entry,
+            l_node->left,
+            f_node->left);
 
         const auto new_right = makeNode(ctx,
             true,
-            right->entry,
-            fused->right,
-            right->right);
+            r_node->entry,
+            f_node->right,
+            r_node->right);
 
         const auto new_node = _makeNode(ctx,
             true,
-            get(fused->entry),
+            get(f_node->entry),
             new_left,
             new_right);
 
-        fused->put();
+        //fused->put(); TODO: fused is owning. so destructor relase?
         return new_node;
       }
 
       const auto new_right = _makeNode(ctx,
           true,
-          get(right->entry),
-          fused,
-          get(right->right));
+          get(r_node->entry),
+          fused, // TODO: i think is like stealing ownership
+          r_node->right.copy());
 
       return _makeNode(ctx,
           true,
-          get(left->entry),
-          get(left->left),
+          get(l_node->entry),
+          l_node->left.copy(),
           new_right);
 
       // case: (B, B)
-    } else if (!left->red && !right->red) {
-      const auto fused = fuse(ctx, left->right, right->left);
-      if (fused && fused->red) {
+    } else if (!l_node->red && !r_node->red) {
+      const auto fused = fuse(ctx, l_node->right, r_node->left);
+      auto f_node = fused();
+      if (f_node && f_node->red) {
         const auto new_left = makeNode(ctx,
             false,
-            left->entry,
-            left->left,
-            fused->left);
+            l_node->entry,
+            l_node->left,
+            f_node->left);
 
         const auto new_right = makeNode(ctx,
             false,
-            right->entry,
-            fused->right,
-            right->right);
+            r_node->entry,
+            f_node->right,
+            r_node->right);
 
         const auto new_node = _makeNode(ctx,
             true,
-            get(fused->entry),
+            get(f_node->entry),
             new_left,
             new_right);
 
-        fused->put();
+        //fused->put();
         return new_node;
       }
 
       const auto new_right = _makeNode(ctx,
           false,
-          get(right->entry),
+          get(r_node->entry),
           fused,
-          get(right->right));
+          r_node->right.copy());
 
       const auto new_node = _makeNode(ctx,
           true,
-          get(left->entry),
-          get(left->left),
+          get(l_node->entry),
+          l_node->left.copy(),
           new_right);
 
       const auto balanced = balance_left(ctx, new_node);
@@ -479,20 +525,18 @@ class Node {
   }
 
   static const Node * balance(const OpContext& ctx, const Node * const node) {
-    if (node->left && node->left->red &&
-        node->right && node->right->red) {
+    if (auto left = node->left(); left && left->red) {
+      if (auto right = node->right(); right && right->red) {
 
-      const auto new_left = node->left ?
-        node->left->copyAsBlack(ctx) : nullptr;
+        const auto new_left = left->copyAsBlack(ctx);
+        const auto new_right = right->copyAsBlack(ctx);
 
-      const auto new_right = node->right ?
-        node->right->copyAsBlack(ctx) : nullptr;
-
-      return _makeNode(ctx,
-          true,
-          get(node->entry),
-          new_left,
-          new_right);
+        return _makeNode(ctx,
+            true,
+            get(node->entry),
+            new_left,
+            new_right);
+      }
     }
 
     assert(!node->red);
@@ -502,31 +546,31 @@ class Node {
   static const Node * balance_left(const OpContext& ctx, const Node * const node) {
     // match: (color_l, color_r, color_r_l)
     // case: (Some(R), ..)
-    if (node->left && node->left->red) {
+    if (auto left = node->left(); left && left->red) {
       const auto new_left = makeNode(ctx,
           false,
-          node->left->entry,
-          node->left->left,
-          node->left->right);
+          left->entry,
+          left->left,
+          left->right);
 
       return _makeNode(ctx,
           true,
           get(node->entry),
           new_left,
-          get(node->right));
+          node->right.copy());
 
       // case: (_, Some(B), _)
-    } else if (node->right && !node->right->red) {
+    } else if (auto right = node->right(); right && !right->red) {
       const auto new_right = makeNode(ctx,
           true,
-          node->right->entry,
-          node->right->left,
-          node->right->right);
+          right->entry,
+          right->left,
+          right->right);
 
       const auto new_node = _makeNode(ctx,
           false,
           get(node->entry),
-          get(node->left),
+          node->left.copy(),
           new_right);
 
       const auto balanced = balance(ctx, new_node);
@@ -535,29 +579,32 @@ class Node {
       return balanced;
 
       // case: (_, Some(R), Some(B))
-    } else if (node->right && node->right->red &&
-        node->right->left && !node->right->left->red) {
+    } else if (auto right = node->right(); right && right->red) { // TODO: resolved right, above
+      if (auto rl_node = right->left(); rl_node && !rl_node->red) {
 
-      const auto unbalanced_new_right = _makeNode(ctx,
-          false,
-          get(node->right->entry),
-          get(node->right->left->right),
-          node->right->right->copyAsRed(ctx));
+        auto rr_node = right->right(); // TODO: unchecked dereference
 
-      const auto new_right = balance(ctx, unbalanced_new_right);
-      unbalanced_new_right->put();
+        const auto unbalanced_new_right = _makeNode(ctx,
+            false,
+            get(right->entry),
+            rl_node->right.copy(),
+            rr_node->copyAsRed(ctx));
 
-      const auto new_left = makeNode(ctx,
-          false,
-          node->entry,
-          node->left,
-          node->right->left->left);
+        const auto new_right = balance(ctx, unbalanced_new_right);
+        unbalanced_new_right->put();
 
-      return _makeNode(ctx,
-          true,
-          get(node->right->left->entry),
-          new_left,
-          new_right);
+        const auto new_left = makeNode(ctx,
+            false,
+            node->entry,
+            node->left,
+            rl_node->left.copy());
+
+        return _makeNode(ctx,
+            true,
+            get(rl_node->entry),
+            new_left,
+            new_right);
+      }
     }
 
     assert(0); // LCOV_EXCL_LINE
@@ -567,32 +614,32 @@ class Node {
       const Node * const node) {
     // match: (color_l, color_l_r, color_r)
     // case: (.., Some(R))
-    if (node->right && node->right->red) {
+    if (auto right = node->right(); right && right->red) {
       const auto new_right = makeNode(ctx,
           false,
-          node->right->entry,
-          node->right->left,
-          node->right->right);
+          right->entry,
+          right->left,
+          right->right);
 
       return _makeNode(ctx,
           true,
           get(node->entry),
-          get(node->left),
+          node->left.copy(),
           new_right);
 
       // case: (Some(B), ..)
-    } else if (node->left && !node->left->red) {
+    } else if (auto left = node->left(); left && !left->red) {
       const auto new_left = makeNode(ctx,
           true,
-          node->left->entry,
-          node->left->left,
-          node->left->right);
+          left->entry,
+          left->left,
+          left->right);
 
       const auto new_node = _makeNode(ctx,
           false,
           get(node->entry),
           new_left,
-          get(node->right));
+          node->right.copy());
 
       const auto balanced = balance(ctx, new_node);
       new_node->put();
@@ -600,46 +647,52 @@ class Node {
       return balanced;
 
       // case: (Some(R), Some(B), _)
-    } else if (node->left && node->left->red &&
-        node->left->right && !node->left->right->red) {
+    } else if (auto left = node->left(); left && left->red) {
+      if (auto lr_node = left->right(); lr_node && !lr_node->red) {
 
-      const auto unbalanced_new_left = _makeNode(ctx,
-          false,
-          get(node->left->entry),
-          node->left->left->copyAsRed(ctx),
-          get(node->left->right->left));
+        auto ll_node = left->left(); // TODO: unchecked
 
-      const auto new_left = balance(ctx, unbalanced_new_left);
-      unbalanced_new_left->put();
+        const auto unbalanced_new_left = _makeNode(ctx,
+            false,
+            get(left->entry),
+            ll_node->copyAsRed(ctx),
+            lr_node->left.copy());
 
-      const auto new_right = makeNode(ctx,
-          false,
-          node->entry,
-          node->left->right->right,
-          node->right);
+        const auto new_left = balance(ctx, unbalanced_new_left);
+        unbalanced_new_left->put();
 
-      return _makeNode(ctx,
-          true,
-          get(node->left->right->entry),
-          new_left,
-          new_right);
+        const auto new_right = makeNode(ctx,
+            false,
+            node->entry,
+            lr_node->right,
+            node->right);
+
+        return _makeNode(ctx,
+            true,
+            get(lr_node->entry),
+            new_left,
+            new_right);
+      }
     }
 
     assert(0); // LCOV_EXCL_LINE
   }
 
-  static std::pair<const Node *, bool> remove_left(const OpContext& ctx,
-      const Node * const node, const std::string& key) {
+  static std::pair<NodePointer, bool> remove_left(const OpContext& ctx,
+      const NodePointer& root, const std::string& key) {
+
+    const auto node = root();
+    assert(node);
+
     const auto [new_left, removed] = remove(ctx, node->left, key);
 
     const auto new_node = _makeNode(ctx,
         true, // In case of rebalance the color does not matter
         get(node->entry),
         new_left,
-        get(node->right));
+        node->right.copy());
 
-    const bool left_black = node->left && !node->left->red;
-    if (left_black) {
+    if (auto left = node->left(); left && !left->red) {
       const auto balanced_new_node = balance_left(ctx, new_node);
       new_node->put();
       return std::make_pair(balanced_new_node, removed);
@@ -648,18 +701,21 @@ class Node {
     }
   }
 
-  static std::pair<const Node *, bool> remove_right(const OpContext& ctx,
-      const Node * const node, const std::string& key) {
+  static std::pair<NodePointer, bool> remove_right(const OpContext& ctx,
+      const NodePointer& root, const std::string& key) {
+
+    const auto node = root();
+    assert(node);
+
     const auto [new_right, removed] = remove(ctx, node->right, key);
 
     const auto new_node = _makeNode(ctx,
         true, // In case of rebalance the color does not matter
         get(node->entry),
-        get(node->left),
+        node->left.copy(),
         new_right);
 
-    const bool right_black = node->right && !node->right->red;
-    if (right_black) {
+    if (auto right = node->right(); right && !right->red) {
       const auto balanced_new_node = balance_right(ctx, new_node);
       new_node->put();
       return std::make_pair(balanced_new_node, removed);
@@ -671,8 +727,8 @@ class Node {
  public:
   const bool red;
   const Entry * const entry;
-  const Node * const left;
-  const Node * const right;
+  NodePointer left;
+  NodePointer right;
   const uint64_t rid;
 
  private:
@@ -745,16 +801,19 @@ class Tree {
   Tree remove(const OpContext& ctx, const std::string& key) const {
     const auto [mb_new_root, removed] = Node::remove(ctx, root_, key);
     if (removed) {
-      if (mb_new_root) {
-        const auto new_root = mb_new_root->copyAsBlack(ctx);
-        mb_new_root->put();
+      auto mb_new_root_node = mb_new_root();
+      if (mb_new_root_node) {
+        // TODO: a simplification might be to proxy copyAsBlack through the node
+        // pointer to catch the different cases.
+        const auto new_root = mb_new_root_node->copyAsBlack(ctx);
+        //mb_new_root->put(); // TODO: release in destructor?
         return Tree(new_root, size_ - 1);
       } else {
         return Tree(nullptr, size_ - 1);
       }
     } else {
-      if (mb_new_root)
-        mb_new_root->put();
+      //if (mb_new_root) // TODO: relaese in destructor?
+      //  mb_new_root->put();
       return *this; // copy constructor takes reference
     }
   }
@@ -763,9 +822,9 @@ class Tree {
     auto cur = root_;
     while (cur) {
       if (key < cur->entry->key) {
-        cur = cur->left;
+        cur = cur->left();
       } else if (key > cur->entry->key) {
-        cur = cur->right;
+        cur = cur->right();
       } else {
         return std::make_pair(cur->entry->key, cur->entry->value);
       }
@@ -780,12 +839,12 @@ class Tree {
     while (!s.empty() || node) {
       if (node) {
         s.push(node);
-        node = node->left;
+        node = node->left();
       } else {
         node = s.top();
         s.pop();
         out.emplace(node->entry->key, node->entry->value);
-        node = node->right;
+        node = node->right();
       }
     }
     return out;
@@ -816,3 +875,10 @@ class Tree {
   const Node *root_;
   std::size_t size_;
 };
+
+NodePointer NodePointer::copy() const
+{
+  if (ptr_)
+    ptr_->get();
+  return NodePointer(ptr_);
+}
