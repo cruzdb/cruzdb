@@ -4,7 +4,7 @@
 
 ---
 
-See https://nwat.xyz/blog/2018/02/15/cruzdb-architecture-part-1-its-a-log-structured-database/ for more information.
+See https://makedist.com/projects/cruzdb/ for more information.
 
 I *love* working on CruzDB and plan to resume work sometime in the future. But for now I'm spending 100% of my time building a next-generation storage engine for modern hardware at https://github.com/redpanda-data/redpanda.
 
