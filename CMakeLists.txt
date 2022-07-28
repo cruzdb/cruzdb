@@ -14,8 +14,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wall -g")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Wall -g")
+#set(cmake_cxx_flags "${cmake_cxx_flags} -werror -wall -g")
+#set(cmake_c_flags "${cmake_c_flags} -werror -wall -g")
+set(cmake_cxx_flags "${cmake_cxx_flags}  -wall -g")
+set(cmake_c_flags "${cmake_c_flags} -wall -g")
 
 if (CMAKE_BUILD_TYPE STREQUAL "Coverage")
     include(CodeCoverage)

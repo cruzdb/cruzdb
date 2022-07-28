@@ -12,7 +12,12 @@ set(java_srcs
   src/main/java/org/cruzdb/CruzIterator.java
   src/main/java/org/cruzdb/Transaction.java)
 
-set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.7" "-target" "1.7" "-Xlint:-options")
+#set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.7" "-target" "1.7" "-Xlint:-options")
+set(CMAKE_JAVA_COMPILE_FLAGS "-source" "11" "-target" "11" "-Xlint:-options")
+
+message(STATUS "XXX zlog java: ${ZLOG_JAVA}")
+
+
 add_jar(cruzdb_jar
   SOURCES ${java_srcs}
   INCLUDE_JARS ${ZLOG_JAVA}
@@ -45,7 +50,8 @@ if (DEFINED CUSTOM_REPO_URL)
   set(CENTRAL_REPO_URL ${CUSTOM_REPO_URL}/)
 else ()
   set(SEARCH_REPO_URL "http://search.maven.org/remotecontent?filepath=")
-  set(CENTRAL_REPO_URL "http://central.maven.org/maven2/")
+  #[[set(CENTRAL_REPO_URL "http://central.maven.org/maven2/")]]
+  set(CENTRAL_REPO_URL "https://repo1.maven.org/maven2/")
 endif()
 
 if(NOT EXISTS ${JAVA_JUNIT_JAR})
@@ -85,22 +91,25 @@ set(java_db_h native/org_cruzdb_CruzDB.h)
 add_custom_command(
   OUTPUT ${java_db_h}
   DEPENDS ${java_srcs}
-  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${ZLOG_JAVA}:${cruzdb_jar_path} 
-    -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_db_h} org.cruzdb.CruzDB)
+  #COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${ZLOG_JAVA}:${cruzdb_jar_path} 
+  # -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_db_h} org.cruzdb.CruzDB)
+  COMMAND javac -h ${CMAKE_CURRENT_BINARY_DIR}/native -classpath ${ZLOG_JAVA}:${cruzdb_jar_path} ${CMAKE_CURRENT_SOURCE_DIR}/src/main/java/org/cruzdb/CruzDB.java)
 
 set(java_it_h native/org_cruzdb_CruzIterator.h)
 add_custom_command(
   OUTPUT ${java_it_h}
   DEPENDS ${java_srcs}
-  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${cruzdb_jar_path}
-    -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_it_h} org.cruzdb.CruzIterator)
+  #COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${cruzdb_jar_path}
+  #  -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_it_h} org.cruzdb.CruzIterator)
+  COMMAND javac -h ${CMAKE_CURRENT_BINARY_DIR}/native -classpath ${cruzdb_jar_path} ${CMAKE_CURRENT_SOURCE_DIR}/src/main/java/org/cruzdb/CruzIterator.java)
 
 set(java_txn_h native/org_cruzdb_Transaction.h)
 add_custom_command(
   OUTPUT ${java_txn_h}
   DEPENDS ${java_srcs}
-  COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${cruzdb_jar_path}
-    -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_txn_h} org.cruzdb.Transaction)
+  # COMMAND ${Java_JAVAH_EXECUTABLE} -classpath ${cruzdb_jar_path}
+  #  -jni -o ${CMAKE_CURRENT_BINARY_DIR}/${java_txn_h} org.cruzdb.Transaction)
+  COMMAND javac -h ${CMAKE_CURRENT_BINARY_DIR}/native -classpath ${cruzdb_jar_path} ${CMAKE_CURRENT_SOURCE_DIR}/src/main/java/org/cruzdb/Transaction.java)
 
 add_custom_target(
   jni_headers
